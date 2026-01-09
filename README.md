@@ -15,7 +15,7 @@
 [Installation](#-installation) •
 [Quick Start](#-quick-start)
 
-[🇷🇺 Русская версия](README_RU.md)
+[🇷🇺 Русский](README_RU.md)
 
 </div>
 
