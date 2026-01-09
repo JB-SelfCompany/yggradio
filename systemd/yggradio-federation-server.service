@@ -1,0 +1,27 @@
+[Unit]
+Description=YggRadio Federation Server
+Documentation=https://github.com/JB-SelfCompany/yggradio
+After=network.target yggdrasil.service
+Wants=yggdrasil.service
+
+[Service]
+Type=simple
+User=yggradio-federation
+Group=yggradio-federation
+ExecStart=/usr/local/bin/yggradio-federation-server
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+
+# Resource limits
+LimitNOFILE=8192
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,170 @@
+# YggRadio Configuration Example
+# Copy this file to ~/.yggradio/config.yaml and customize as needed
+
+# HTTP Server Configuration
+server:
+  # Port to listen on
+  port: 8080
+
+  # Bind address (empty = auto-detect Yggdrasil IPv6 address)
+  # Leave empty for automatic Yggdrasil address detection
+  # Or specify custom address like "[200:1234::1]" or "0.0.0.0" for all interfaces
+  bind: "[::]"
+
+  # Instance name (displayed in web UI)
+  instance_name: "My YggRadio Station"
+
+  # Instance description
+  instance_description: "Decentralized radio platform on Yggdrasil"
+
+  # HTTP timeouts
+  read_timeout: 30s
+  write_timeout: 180s  # Increased for streaming
+  idle_timeout: 120s
+
+# Database Configuration
+database:
+  # SQLite database path (~ will be expanded to home directory)
+  path: "~/.yggradio/yggradio.db"
+
+  # Maximum database connections (SQLite limitation: must be 1)
+  max_connections: 1
+
+  # Connection lifetime
+  connection_lifetime: 3600s
+
+# Streaming Configuration
+streaming:
+  # Maximum listeners per station
+  max_listeners_per_station: 100
+
+  # Maximum concurrent source clients
+  max_source_clients: 10
+
+  # Buffer size for streaming (bytes)
+  # Lower = less latency, Higher = better for unstable connections
+  buffer_size: 32768  # 32KB
+
+  # Metadata interval (bytes between metadata updates)
+  metadata_interval: 16000  # 16KB
+
+  # Timeout for slow clients (disconnect if client can't keep up)
+  slow_client_timeout: 10s
+
+  # Server secret for source password generation
+  # Leave empty - will be auto-generated on first run
+  # DO NOT share this secret - it's used for HMAC authentication
+  server_secret: ""
+
+# Moderation Configuration
+moderation:
+  # Proof-of-Work difficulty for account creation (bits)
+  # Higher = more CPU work required (prevents spam)
+  # Range: 4-20 (16 = ~4-8 seconds on modern CPU)
+  pow_difficulty_account: 16
+
+  # Proof-of-Work difficulty for station creation (bits)
+  # Higher difficulty for important actions
+  # Range: 4-20 (20 = ~1-2 minutes on modern CPU)
+  pow_difficulty_station: 20
+
+# Federation Configuration
+federation:
+  # Enable federation (join a network of YggRadio instances)
+  enabled: false
+
+  # Federation server IPv6 address (Yggdrasil address)
+  server_address: "301:be28:cf55:3c9::10"
+
+  # Federation server port
+  server_port: 9000
+
+  # How often to register with federation server (seconds)
+  register_interval: 120  # 2 minutes
+
+  # How often to query for new stations (seconds)
+  query_interval: 60  # 1 minute
+
+  # Timeout for federation requests
+  timeout: 30  # 30 seconds
+
+# Rate Limiting Configuration
+rate_limit:
+  # API requests per minute per IP
+  api_requests_per_minute: 100
+
+  # Authentication attempts per minute per IP
+  auth_attempts_per_minute: 10
+
+  # Station creation per hour per user
+  station_creation_per_hour: 1
+
+  # Comments per hour per user
+  comments_per_hour: 30
+
+  # Source connections per minute per IP
+  source_connections_per_minute: 5
+
+  # Listener connections per minute per IP
+  listener_connections_per_minute: 20
+
+# Security Configuration
+security:
+  # CSRF token TTL (seconds)
+  csrf_token_ttl: 900  # 15 minutes
+
+  # Enable security audit logging
+  enable_security_audit: true
+
+  # Audit log retention (seconds)
+  audit_log_retention: 2592000  # 30 days
+
+  # Automatically block IPs after failed authentication
+  auto_block_on_failed_auth: true
+
+  # Number of failed auth attempts before blocking
+  failed_auth_threshold: 10
+
+  # How long to block IPs (seconds)
+  block_duration: 3600  # 1 hour
+
+  # Enable Content Security Policy headers
+  csp_enabled: true
+
+  # Magic Link Authentication Settings
+  # Enable magic link authentication (cookie-based)
+  magic_link_enabled: true
+
+  # Magic link token length in bytes (48 hex chars = 24 bytes)
+  # Higher = more security, Range: 16-32 bytes
+  magic_link_token_length: 24
+
+  # Magic link cookie TTL (seconds)
+  # How long the session cookie remains valid
+  magic_link_cookie_ttl: 604800  # 1 week
+
+  # Magic link cookie name
+  magic_link_cookie_name: "yggradio_auth"
+
+  # Require Proof-of-Work for magic link registration
+  # Prevents spam account creation
+  magic_link_require_pow: true
+
+  # Magic link Proof-of-Work difficulty (bits)
+  # Same difficulty as station creation to prevent abuse
+  # Range: 4-20 (16 = ~4-8 seconds on modern CPU)
+  magic_link_pow_difficulty: 16
+
+# Logging Configuration
+logging:
+  # Log level: debug, info, warn, error
+  level: "info"
+
+  # Log format: json, text
+  format: "json"
+
+  # Log output: stdout, stderr, file
+  output: "stdout"
+
+  # Security events log file
+  security_events: "~/.yggradio/security.log"

@@ -1,0 +1,16 @@
+# Binaries
+bin/
+
+# IDE specific files
+.idea/
+.vscode/
+
+# Frontend
+web/node_modules/
+web/dist/
+
+# Embedded frontend build (copied from web/dist/)
+internal/web/dist/
+
+# Build artifacts
+dist/
