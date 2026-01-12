@@ -15,7 +15,7 @@
 [Installation](#-installation) •
 [Quick Start](#-quick-start)
 
-[🇷🇺 Русский](README_RU.md)
+[🇷🇺 Русская версия](README_RU.md)
 
 </div>
 
@@ -101,7 +101,9 @@ bash build.sh  # Linux/macOS
 
 For production deployments on Linux, use systemd to run YggRadio as a service:
 
-#### YggRadio Service
+#### YggRadio Service (Required)
+
+**This is the main application that you need to run.**
 
 ```bash
 # Create system user
@@ -136,7 +138,9 @@ sudo systemctl status yggradio
 sudo journalctl -u yggradio -f
 ```
 
-#### Federation Server Service
+#### Federation Server Service (Optional - Advanced Users Only)
+
+> **⚠️ Note:** This service is **optional** and only needed if you want to run your own federation discovery hub. Most users should **skip this section** and just run the main YggRadio service above. You can join an existing federation by configuring `federation.enabled: true` in your `config.yaml` without running a federation server.
 
 ```bash
 # Create system user
@@ -176,6 +180,8 @@ sudo journalctl -u yggradio-federation-server -f
 ---
 
 ## 🚀 Quick Start
+
+> **📝 Note:** This guide shows how to run the main YggRadio application. You do **not** need to run a federation server - YggRadio works perfectly in standalone mode!
 
 1. **Install and start Yggdrasil daemon:**
    ```bash
@@ -351,10 +357,19 @@ Use any streaming source client that supports HTTP streaming:
 
 **ffmpeg example:**
 ```bash
-ffmpeg -re -i music.mp3 -codec:a libmp3lame -b:a 128k \
-  -f mp3 http://[YOUR_YGGDRASIL_IP]:8080/your-mountpoint \
-  -user username -password your-source-password
+ffmpeg -re -i your-audio.flac \
+  -codec:a libmp3lame -b:a 128k \
+  -vn \
+  -f mp3 -content_type audio/mpeg \
+  -method PUT \
+  'http://username:password@[YOUR_YGGDRASIL_IP]:8080/your-mountpoint'
 ```
+
+Replace:
+- `your-audio.flac` - your audio file
+- `username:password` - credentials from Stream Key
+- `[YOUR_YGGDRASIL_IP]` - your Yggdrasil IPv6 address
+- `/your-mountpoint` - your station's mountpoint
 
 **OBS Studio:**
 1. Settings → Stream
@@ -383,6 +398,8 @@ The web player will automatically load and stream audio.
 
 Federation allows YggRadio instances to discover each other through a central hub.
 
+> **💡 Important:** Federation is **completely optional**. YggRadio works perfectly in standalone mode. You only need to enable federation if you want to discover stations from other nodes in the network. Running your own federation server is only necessary if you want to host a discovery hub - most users can simply join an existing federation.
+
 ### Joining a Federation
 
 1. Edit `~/.yggradio/config.yaml`:
@@ -398,7 +415,9 @@ Federation allows YggRadio instances to discover each other through a central hu
    sudo systemctl restart yggradio
    ```
 
-### Running a Federation Server
+### Running a Federation Server (Optional - Advanced)
+
+> **⚠️ Note:** This is only needed if you want to **host your own** federation discovery hub. Most users should skip this and either use standalone mode or join an existing federation.
 
 ```bash
 # Install federation server
