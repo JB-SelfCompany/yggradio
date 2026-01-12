@@ -453,3 +453,107 @@ func SanitizeError(err error) string {
 	// Generic safe message for anything else
 	return "Operation failed"
 }
+
+// ValidateExternalStreamURL validates external stream URLs for SSRF protection
+// SECURITY: Critical for preventing SSRF attacks when fetching external HLS/audio streams
+// Blocks localhost, private IP ranges, and non-HTTP(S) schemes
+func (v *Validator) ValidateExternalStreamURL(urlStr string) error {
+	if urlStr == "" {
+		return nil // Optional field
+	}
+
+	urlStr = strings.TrimSpace(urlStr)
+
+	// Maximum length check
+	if len(urlStr) > 2048 {
+		return errors.New("URL too long (max 2048 characters)")
+	}
+
+	// Parse URL
+	parsed, err := url.Parse(urlStr)
+	if err != nil {
+		return errors.New("invalid URL format")
+	}
+
+	// SECURITY: Only allow HTTP/HTTPS schemes
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("only http and https URLs are allowed")
+	}
+
+	// SECURITY: URL must have a host
+	if parsed.Host == "" {
+		return errors.New("URL must have a host")
+	}
+
+	// Extract hostname (without port)
+	hostname := parsed.Hostname()
+	if hostname == "" {
+		return errors.New("invalid hostname")
+	}
+
+	// SECURITY: Block localhost (case-insensitive)
+	lowerHostname := strings.ToLower(hostname)
+	if lowerHostname == "localhost" ||
+		lowerHostname == "127.0.0.1" ||
+		lowerHostname == "::1" ||
+		lowerHostname == "0.0.0.0" ||
+		lowerHostname == "::" {
+		return errors.New("localhost addresses not allowed (SSRF protection)")
+	}
+
+	// Resolve hostname to IP address
+	ips, err := net.LookupIP(hostname)
+	if err != nil {
+		return errors.New("failed to resolve hostname")
+	}
+
+	if len(ips) == 0 {
+		return errors.New("hostname did not resolve to any IP address")
+	}
+
+	// SECURITY: Check each resolved IP for private/local ranges
+	for _, ip := range ips {
+		// Block loopback addresses
+		if ip.IsLoopback() {
+			return errors.New("loopback addresses not allowed (SSRF protection)")
+		}
+
+		// Block private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+		if ip.IsPrivate() {
+			return errors.New("private IP addresses not allowed (SSRF protection)")
+		}
+
+		// Block link-local addresses (fe80::/10 for IPv6, 169.254.0.0/16 for IPv4)
+		if ip.IsLinkLocalUnicast() {
+			return errors.New("link-local addresses not allowed (SSRF protection)")
+		}
+
+		// Block multicast addresses
+		if ip.IsMulticast() {
+			return errors.New("multicast addresses not allowed (SSRF protection)")
+		}
+
+		// Block unspecified addresses (0.0.0.0, ::)
+		if ip.IsUnspecified() {
+			return errors.New("unspecified addresses not allowed (SSRF protection)")
+		}
+	}
+
+	return nil
+}
+
+// ValidateExternalStreamType validates external stream type
+func (v *Validator) ValidateExternalStreamType(streamType string) error {
+	if streamType == "" {
+		return nil // Optional field (when external_stream_url is also empty)
+	}
+
+	streamType = strings.ToLower(strings.TrimSpace(streamType))
+
+	// Only allow "hls" or "direct"
+	if streamType != "hls" && streamType != "direct" {
+		return errors.New("stream type must be 'hls' or 'direct'")
+	}
+
+	return nil
+}

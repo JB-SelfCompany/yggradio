@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
-import { Radio, Users, Play, Search, Plus, Key, Edit, Trash2, StopCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Radio, Users, Play, Search, Plus, Key, Edit, Trash2, StopCircle, ArrowUpDown } from 'lucide-react';
 import { api, base64ToHex, fetchCSRFToken } from '../lib/api';
 import { usePlayerStore, Station } from '../stores/playerStore';
 import { useAuthStore } from '../stores/authStore';
@@ -12,21 +12,34 @@ import RatingComponent from '../components/Station/RatingComponent';
 
 export default function StationBrowser() {
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'listeners' | 'rating' | 'created'>('created');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [credentialsStation, setCredentialsStation] = useState<Station | null>(null);
   const [editStation, setEditStation] = useState<Station | null>(null);
   const [deleteConfirmStation, setDeleteConfirmStation] = useState<Station | null>(null);
-  const { playStation, currentStation, isPlaying } = usePlayerStore();
+  const { playStation, currentStation, isPlaying, stop } = usePlayerStore();
   const { isAuthenticated, publicKey } = useAuthStore();
 
   // Fetch stations with optional auth to see private stations if logged in
   const { data: stationsResponse, isLoading, error, refetch } = useQuery<{ stations: Station[] }>({
-    queryKey: ['stations', isAuthenticated], // Re-fetch when auth state changes
-    queryFn: () => api.get<{ stations: Station[] }>('/stations', false, true), // optionalAuth = true
+    queryKey: ['stations', isAuthenticated, sortBy, sortOrder], // Re-fetch when auth state or sorting changes
+    queryFn: () => api.get<{ stations: Station[] }>(`/stations?sort_by=${sortBy}&sort_order=${sortOrder}`, false, true), // optionalAuth = true
     refetchInterval: 10000, // Refresh every 10 seconds
   });
 
   const stations = stationsResponse?.stations;
+
+  // Auto-stop player if current station goes offline
+  useEffect(() => {
+    if (currentStation && isPlaying && stations) {
+      const updatedStation = stations.find(s => s.uuid === currentStation.uuid);
+      if (updatedStation && updatedStation.status === 'offline') {
+        console.log('Station went offline, stopping playback');
+        stop();
+      }
+    }
+  }, [stations, currentStation, isPlaying, stop]);
 
   const handleStationCreated = () => {
     refetch(); // Refresh station list after creation
@@ -67,9 +80,21 @@ export default function StationBrowser() {
     try {
       const csrfToken = await fetchCSRFToken();
       await api.post(`/stations/${station.id}/stop`, {}, true, csrfToken);
-      refetch();
+      // Small delay to ensure status is updated in DB before refetching
+      setTimeout(() => refetch(), 500);
     } catch (err: any) {
       alert(err.message || 'Failed to stop broadcast');
+    }
+  };
+
+  const handleStartBroadcast = async (station: Station) => {
+    try {
+      const csrfToken = await fetchCSRFToken();
+      await api.post(`/stations/${station.id}/start`, {}, true, csrfToken);
+      // Small delay to ensure status is updated in DB before refetching
+      setTimeout(() => refetch(), 500);
+    } catch (err: any) {
+      alert(err.message || 'Failed to start broadcast');
     }
   };
 
@@ -127,6 +152,35 @@ export default function StationBrowser() {
         </div>
       </div>
 
+      {/* Sorting Controls */}
+      <div className="mb-6 flex flex-wrap gap-3 items-center">
+        <div className="flex items-center gap-2 text-gray-400">
+          <ArrowUpDown className="w-4 h-4" />
+          <span className="text-sm font-medium">Sort by:</span>
+        </div>
+
+        {/* Sort By Selector */}
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as 'listeners' | 'rating' | 'created')}
+          className="px-4 py-2 bg-gray-900 border border-gray-800 rounded-lg focus:border-indigo-500 focus:outline-none text-sm"
+        >
+          <option value="created">Creation Date</option>
+          <option value="listeners">Listeners Count</option>
+          <option value="rating">Rating</option>
+        </select>
+
+        {/* Sort Order Selector */}
+        <select
+          value={sortOrder}
+          onChange={(e) => setSortOrder(e.target.value as 'asc' | 'desc')}
+          className="px-4 py-2 bg-gray-900 border border-gray-800 rounded-lg focus:border-indigo-500 focus:outline-none text-sm"
+        >
+          <option value="desc">Descending</option>
+          <option value="asc">Ascending</option>
+        </select>
+      </div>
+
       {/* Loading State */}
       {isLoading && (
         <div className="text-center py-12 text-gray-400">
@@ -162,9 +216,21 @@ export default function StationBrowser() {
             {/* Station Header */}
             <div className="flex items-start justify-between mb-4">
               <div className="flex-1 min-w-0">
-                <h3 className="text-lg font-semibold truncate mb-1">
-                  {station.name}
-                </h3>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-lg font-semibold truncate">
+                    {station.name}
+                  </h3>
+                  {/* Show stream type tag */}
+                  {station.external_stream_url ? (
+                    <span className="px-2 py-0.5 bg-blue-900 bg-opacity-50 border border-blue-700 rounded text-xs font-medium text-blue-300 flex-shrink-0">
+                      HLS
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 bg-green-900 bg-opacity-50 border border-green-700 rounded text-xs font-medium text-green-300 flex-shrink-0">
+                      Direct
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-2 text-sm text-gray-400">
                   <span className={`w-2 h-2 rounded-full ${
                     station.status === 'online' ? 'bg-green-500' : 'bg-gray-500'
@@ -195,12 +261,14 @@ export default function StationBrowser() {
             )}
 
             {/* Current Track */}
-            {station.metadata_title && (
+            {(station.metadata_title || (station.external_stream_url && station.status === 'online')) && (
               <div className="mb-4 p-3 bg-gray-800 rounded text-sm">
                 <div className="text-gray-500 text-xs mb-1">
                   {station.status === 'online' ? 'Now Playing:' : 'Last Playing:'}
                 </div>
-                <div className="font-medium break-words">{station.metadata_title}</div>
+                <div className="font-medium break-words">
+                  {station.metadata_title || 'External Source'}
+                </div>
               </div>
             )}
 
@@ -219,16 +287,18 @@ export default function StationBrowser() {
             </div>
 
             {/* Stats */}
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-1 text-gray-400">
-                <Users className="w-4 h-4" />
-                <span>{station.listeners_count || 0} listeners</span>
-              </div>
-              {station.bitrate && (
-                <div className="text-gray-500">
-                  {station.bitrate}kbps
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-1 text-gray-400">
+                  <Users className="w-4 h-4" />
+                  <span>{station.listeners_count || 0} listeners</span>
                 </div>
-              )}
+                {station.bitrate && (
+                  <div className="text-gray-500">
+                    {station.bitrate}kbps
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Actions */}
@@ -236,13 +306,16 @@ export default function StationBrowser() {
               {/* Owner-only actions */}
               {isOwner(station) && (
                 <>
-                  <button
-                    onClick={() => showCredentials(station)}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 rounded text-sm transition-colors"
-                  >
-                    <Key className="w-4 h-4" />
-                    Stream Key
-                  </button>
+                  {/* Stream Key button - only for direct streaming stations */}
+                  {!station.external_stream_url && (
+                    <button
+                      onClick={() => showCredentials(station)}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 rounded text-sm transition-colors"
+                    >
+                      <Key className="w-4 h-4" />
+                      Stream Key
+                    </button>
+                  )}
 
                   <div className="flex gap-2">
                     <button
@@ -260,6 +333,16 @@ export default function StationBrowser() {
                       >
                         <StopCircle className="w-4 h-4" />
                         Stop
+                      </button>
+                    )}
+
+                    {station.status === 'offline' && station.external_stream_url && (
+                      <button
+                        onClick={() => handleStartBroadcast(station)}
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 rounded text-sm transition-colors"
+                      >
+                        <Play className="w-4 h-4" />
+                        Start
                       </button>
                     )}
                   </div>

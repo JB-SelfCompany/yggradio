@@ -38,6 +38,10 @@ type StationHandler struct {
 type StreamingServer interface {
 	DisconnectSource(mountpoint string) error
 	ServeHTTP(w http.ResponseWriter, r *http.Request)
+	// External stream management (v1.1.0+)
+	StopExternalStream(mountpoint string)
+	StartExternalStream(mountpoint string) error
+	IsExternalStreamActive(mountpoint string) bool
 }
 
 // NewStationHandler creates a new station handler
@@ -84,14 +88,39 @@ func (h *StationHandler) ListStations(w http.ResponseWriter, r *http.Request) {
 		limit = 50
 	}
 
+	// Parse sorting parameters (v1.1.0+)
+	sortBy := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sort_by")))
+	sortOrder := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sort_order")))
+
+	// Validate and set defaults
+	if sortBy == "" {
+		sortBy = "created" // Default sort by creation date
+	}
+	if sortOrder == "" {
+		sortOrder = "desc" // Default descending order
+	}
+
+	// Whitelist validation (additional safety, already validated in repository)
+	validSortBy := map[string]bool{"listeners": true, "rating": true, "created": true}
+	if !validSortBy[sortBy] {
+		http.Error(w, "Invalid sort_by parameter. Must be: listeners, rating, or created", http.StatusBadRequest)
+		return
+	}
+
+	validSortOrder := map[string]bool{"asc": true, "desc": true}
+	if !validSortOrder[sortOrder] {
+		http.Error(w, "Invalid sort_order parameter. Must be: asc or desc", http.StatusBadRequest)
+		return
+	}
+
 	// Extract optional pubkey from context
 	ownerPubkey := ""
 	if pubkey, ok := r.Context().Value("pubkey").(string); ok {
 		ownerPubkey = pubkey
 	}
 
-	// Get LOCAL stations from database with privacy filter
-	stations, err := h.stationRepo.ListWithPrivacyFilter(limit, offset, ownerPubkey)
+	// Get LOCAL stations from database with privacy filter and sorting
+	stations, err := h.stationRepo.ListWithPrivacyFilterSorted(limit, offset, ownerPubkey, sortBy, sortOrder)
 	if err != nil {
 		h.logger.Printf("ERROR: Failed to list stations: %v", err)
 		http.Error(w, "Failed to retrieve stations", http.StatusInternalServerError)
@@ -140,6 +169,18 @@ func (h *StationHandler) ListStations(w http.ResponseWriter, r *http.Request) {
 		}
 		if station.Bitrate.Valid {
 			item["bitrate"] = station.Bitrate.Int64
+		}
+
+		// External stream fields (v1.1.0+)
+		if station.ExternalStreamURL.Valid {
+			item["external_stream_url"] = station.ExternalStreamURL.String
+		}
+		if station.ExternalStreamType.Valid {
+			item["external_stream_type"] = station.ExternalStreamType.String
+			// For HLS streams, provide proxy URL for browser playback
+			if station.ExternalStreamType.String == "hls" {
+				item["hls_proxy_url"] = fmt.Sprintf("/proxy/hls%s/playlist.m3u8", station.Mountpoint)
+			}
 		}
 
 		response = append(response, item)
@@ -199,12 +240,72 @@ func (h *StationHandler) ListStations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Sort combined results (local + federated) by requested field (v1.1.0+)
+	// Note: Local stations are already sorted by DB, but federated need sorting
+	if len(response) > 0 {
+		sortStationsByField(response, sortBy, sortOrder)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"stations": response,
 		"limit":    limit,
 		"offset":   offset,
 	})
+}
+
+// sortStationsByField sorts stations by the specified field and order
+func sortStationsByField(stations []map[string]interface{}, sortBy, sortOrder string) {
+	// Simple bubble sort for small lists (pagination limits to max 100)
+	switch sortBy {
+	case "listeners":
+		if sortOrder == "asc" {
+			// Ascending order
+			for i := 0; i < len(stations)-1; i++ {
+				for j := i + 1; j < len(stations); j++ {
+					count1, _ := stations[i]["listeners_count"].(int)
+					count2, _ := stations[j]["listeners_count"].(int)
+					if count1 > count2 {
+						stations[i], stations[j] = stations[j], stations[i]
+					}
+				}
+			}
+		} else {
+			// Descending order
+			for i := 0; i < len(stations)-1; i++ {
+				for j := i + 1; j < len(stations); j++ {
+					count1, _ := stations[i]["listeners_count"].(int)
+					count2, _ := stations[j]["listeners_count"].(int)
+					if count1 < count2 {
+						stations[i], stations[j] = stations[j], stations[i]
+					}
+				}
+			}
+		}
+	case "rating":
+		if sortOrder == "asc" {
+			for i := 0; i < len(stations)-1; i++ {
+				for j := i + 1; j < len(stations); j++ {
+					rating1, _ := stations[i]["average_rating"].(float64)
+					rating2, _ := stations[j]["average_rating"].(float64)
+					if rating1 > rating2 {
+						stations[i], stations[j] = stations[j], stations[i]
+					}
+				}
+			}
+		} else {
+			for i := 0; i < len(stations)-1; i++ {
+				for j := i + 1; j < len(stations); j++ {
+					rating1, _ := stations[i]["average_rating"].(float64)
+					rating2, _ := stations[j]["average_rating"].(float64)
+					if rating1 < rating2 {
+						stations[i], stations[j] = stations[j], stations[i]
+					}
+				}
+			}
+		}
+	// For "created", stations are already sorted by DB query
+	}
 }
 
 // GetStation returns a single station by ID or mountpoint
@@ -284,6 +385,18 @@ func (h *StationHandler) GetStation(w http.ResponseWriter, r *http.Request) {
 		response["bitrate"] = station.Bitrate.Int64
 	}
 
+	// External stream fields (v1.1.0+)
+	if station.ExternalStreamURL.Valid {
+		response["external_stream_url"] = station.ExternalStreamURL.String
+	}
+	if station.ExternalStreamType.Valid {
+		response["external_stream_type"] = station.ExternalStreamType.String
+		// For HLS streams, provide proxy URL for browser playback
+		if station.ExternalStreamType.String == "hls" {
+			response["hls_proxy_url"] = fmt.Sprintf("/proxy/hls%s/playlist.m3u8", station.Mountpoint)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -338,14 +451,16 @@ func (h *StationHandler) CreateStation(w http.ResponseWriter, r *http.Request) {
 
 	// Parse request
 	var req struct {
-		Name         string `json:"name"`
-		Description  string `json:"description"`
-		Mountpoint   string `json:"mountpoint"`
-		ContentType  string `json:"content_type"`
-		Bitrate      *int64 `json:"bitrate"`
-		IsPrivate    bool   `json:"is_private"`
-		PoWNonce     string `json:"pow_nonce"`
-		PoWTimestamp int64  `json:"pow_timestamp"`
+		Name               string `json:"name"`
+		Description        string `json:"description"`
+		Mountpoint         string `json:"mountpoint"`
+		ContentType        string `json:"content_type"`
+		Bitrate            *int64 `json:"bitrate"`
+		IsPrivate          bool   `json:"is_private"`
+		PoWNonce           string `json:"pow_nonce"`
+		PoWTimestamp       int64  `json:"pow_timestamp"`
+		ExternalStreamURL  string `json:"external_stream_url"`  // v1.1.0+
+		ExternalStreamType string `json:"external_stream_type"` // v1.1.0+ ("hls" or "direct")
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -380,6 +495,25 @@ func (h *StationHandler) CreateStation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate external stream URL and type (v1.1.0+)
+	if req.ExternalStreamURL != "" {
+		// Validate URL with SSRF protection
+		if err := h.validator.ValidateExternalStreamURL(req.ExternalStreamURL); err != nil {
+			h.logger.Printf("ERROR: Invalid external_stream_url '%s': %v", req.ExternalStreamURL, err)
+			http.Error(w, fmt.Sprintf("Invalid external_stream_url: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Validate stream type
+		if err := h.validator.ValidateExternalStreamType(req.ExternalStreamType); err != nil {
+			h.logger.Printf("ERROR: Invalid external_stream_type '%s': %v", req.ExternalStreamType, err)
+			http.Error(w, fmt.Sprintf("Invalid external_stream_type: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		h.logger.Printf("External stream configured: type=%s, url=%s", req.ExternalStreamType, req.ExternalStreamURL)
+	}
+
 	// Verify Proof-of-Work
 	challenge := &moderation.Challenge{
 		Pubkey:     ownerPubkey,
@@ -410,6 +544,12 @@ func (h *StationHandler) CreateStation(w http.ResponseWriter, r *http.Request) {
 
 	if req.Bitrate != nil {
 		station.Bitrate = sql.NullInt64{Int64: *req.Bitrate, Valid: true}
+	}
+
+	// Add external stream fields (v1.1.0+)
+	if req.ExternalStreamURL != "" {
+		station.ExternalStreamURL = sql.NullString{String: req.ExternalStreamURL, Valid: true}
+		station.ExternalStreamType = sql.NullString{String: req.ExternalStreamType, Valid: true}
 	}
 
 	// Save to database
@@ -502,9 +642,11 @@ func (h *StationHandler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 
 	// Parse update request
 	var req struct {
-		Name        *string `json:"name"`
-		Description *string `json:"description"`
-		IsPrivate   *bool   `json:"is_private"`
+		Name               *string `json:"name"`
+		Description        *string `json:"description"`
+		IsPrivate          *bool   `json:"is_private"`
+		ExternalStreamURL  *string `json:"external_stream_url"`  // v1.1.0+
+		ExternalStreamType *string `json:"external_stream_type"` // v1.1.0+
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -537,6 +679,39 @@ func (h *StationHandler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 
 	if req.IsPrivate != nil {
 		station.IsPrivate = *req.IsPrivate
+	}
+
+	// Update external stream fields (v1.1.0+)
+	if req.ExternalStreamURL != nil {
+		url := strings.TrimSpace(*req.ExternalStreamURL)
+		if url != "" {
+			// Validate URL with SSRF protection
+			if err := h.validator.ValidateExternalStreamURL(url); err != nil {
+				http.Error(w, fmt.Sprintf("Invalid external_stream_url: %v", err), http.StatusBadRequest)
+				return
+			}
+
+			// Validate stream type (required when URL is set)
+			if req.ExternalStreamType == nil || *req.ExternalStreamType == "" {
+				http.Error(w, "external_stream_type required when external_stream_url is set", http.StatusBadRequest)
+				return
+			}
+
+			streamType := strings.ToLower(strings.TrimSpace(*req.ExternalStreamType))
+			if err := h.validator.ValidateExternalStreamType(streamType); err != nil {
+				http.Error(w, fmt.Sprintf("Invalid external_stream_type: %v", err), http.StatusBadRequest)
+				return
+			}
+
+			station.ExternalStreamURL = sql.NullString{String: url, Valid: true}
+			station.ExternalStreamType = sql.NullString{String: streamType, Valid: true}
+			h.logger.Printf("Updated external stream: type=%s, url=%s", streamType, url)
+		} else {
+			// Empty URL - clear external stream settings
+			station.ExternalStreamURL = sql.NullString{Valid: false}
+			station.ExternalStreamType = sql.NullString{Valid: false}
+			h.logger.Printf("Cleared external stream settings for station %d", station.ID)
+		}
 	}
 
 	// Save changes
@@ -789,21 +964,137 @@ func (h *StationHandler) StopBroadcast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Disconnect source from streaming server
+	// Stop broadcast (different handling for external vs normal stations)
 	if h.streamingServer != nil {
-		if err := h.streamingServer.DisconnectSource(station.Mountpoint); err != nil {
-			h.logger.Printf("ERROR: Failed to disconnect source for %s: %v", station.Mountpoint, err)
-			http.Error(w, "Failed to stop broadcast", http.StatusInternalServerError)
-			return
+		// Check if this is an external stream (HLS or Direct)
+		if station.ExternalStreamURL.Valid && station.ExternalStreamURL.String != "" {
+			// Stop external stream (HLS or Direct)
+			h.streamingServer.StopExternalStream(station.Mountpoint)
+			h.logger.Printf("External stream stopped for station %s by owner %s", station.Mountpoint, ownerPubkey)
+
+			// Update station status to offline immediately in DB
+			if err := h.stationRepo.UpdateStatus(station.Mountpoint, "offline"); err != nil {
+				h.logger.Printf("WARNING: Failed to update station status to offline: %v", err)
+			}
+
+			// Disable auto_start to prevent monitor from restarting the stream
+			if err := h.stationRepo.UpdateAutoStart(station.Mountpoint, false); err != nil {
+				h.logger.Printf("WARNING: Failed to update auto_start flag: %v", err)
+			}
+		} else {
+			// Normal station - disconnect source client
+			if err := h.streamingServer.DisconnectSource(station.Mountpoint); err != nil {
+				h.logger.Printf("ERROR: Failed to disconnect source for %s: %v", station.Mountpoint, err)
+				http.Error(w, "Failed to stop broadcast", http.StatusInternalServerError)
+				return
+			}
+			h.logger.Printf("Broadcast stopped for station %s by owner %s", station.Mountpoint, ownerPubkey)
 		}
 	}
-
-	h.logger.Printf("Broadcast stopped for station %s by owner %s", station.Mountpoint, ownerPubkey)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "success",
 		"message": "Broadcast stopped successfully",
+	})
+}
+
+// StartBroadcast starts or resumes a station's broadcast (external streams only)
+func (h *StationHandler) StartBroadcast(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get authenticated user - supports both Ed25519 and Magic Link authentication
+	var ownerPubkey string
+	var userID int64
+
+	// Try to get user_id first (works for both auth methods)
+	if uid, ok := r.Context().Value("user_id").(int64); ok {
+		userID = uid
+	} else {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Check auth method to determine how to get ownerPubkey
+	authMethod, _ := r.Context().Value("auth_method").(string)
+
+	if authMethod == "ed25519" {
+		// Ed25519 users: use their actual public key
+		if pubkey, ok := r.Context().Value("pubkey").(string); ok {
+			ownerPubkey = pubkey
+		} else {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	} else if authMethod == "magic_link" {
+		// Magic link users: generate synthetic pubkey from user_id
+		ownerPubkey = fmt.Sprintf("magiclink:%054d", userID)
+	} else {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Extract station ID from URL
+	path := strings.TrimPrefix(r.URL.Path, "/api/stations/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 1 {
+		http.Error(w, "Invalid URL", http.StatusBadRequest)
+		return
+	}
+
+	id, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid station ID", http.StatusBadRequest)
+		return
+	}
+
+	// Get station
+	station, err := h.stationRepo.GetByID(id)
+	if err != nil {
+		http.Error(w, "Failed to retrieve station", http.StatusInternalServerError)
+		return
+	}
+
+	if station == nil {
+		http.Error(w, "Station not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify ownership
+	if station.OwnerPubkey != ownerPubkey {
+		http.Error(w, "Forbidden: you don't own this station", http.StatusForbidden)
+		return
+	}
+
+	// Only works for external streams
+	if !station.ExternalStreamURL.Valid || station.ExternalStreamURL.String == "" {
+		http.Error(w, "This endpoint only works for external streams (HLS/Direct)", http.StatusBadRequest)
+		return
+	}
+
+	// Start external stream
+	if h.streamingServer != nil {
+		if err := h.streamingServer.StartExternalStream(station.Mountpoint); err != nil {
+			h.logger.Printf("ERROR: Failed to start external stream for %s: %v", station.Mountpoint, err)
+			http.Error(w, fmt.Sprintf("Failed to start broadcast: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Enable auto_start so monitor will keep the stream running
+		if err := h.stationRepo.UpdateAutoStart(station.Mountpoint, true); err != nil {
+			h.logger.Printf("WARNING: Failed to update auto_start flag: %v", err)
+		}
+	}
+
+	h.logger.Printf("External stream started for station %s by owner %s", station.Mountpoint, ownerPubkey)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": "Broadcast started successfully",
 	})
 }
 

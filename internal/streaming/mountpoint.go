@@ -37,6 +37,10 @@ type Mountpoint struct {
 	ringBufferSize int
 	ringBufferPos  int
 
+	// Init segment for fMP4 streams
+	initSegmentMu sync.RWMutex
+	initSegment   []byte
+
 	// Control channels
 	stopChan     chan struct{}
 	metadataChan chan string
@@ -223,6 +227,23 @@ func (m *Mountpoint) distributeToListeners(data []byte) {
 
 // sendBurst sends buffered data to a new listener (burst-on-connect)
 func (m *Mountpoint) sendBurst(listener *Listener) {
+	// For fMP4 streams, send init segment first (critical!)
+	m.initSegmentMu.RLock()
+	initSeg := m.initSegment
+	m.initSegmentMu.RUnlock()
+
+	if initSeg != nil && len(initSeg) > 0 {
+		select {
+		case listener.Chan <- initSeg:
+			listener.BytesSent += int64(len(initSeg))
+			m.logger.Printf("Sent init segment to new listener (%d bytes)", len(initSeg))
+		default:
+			// Channel full, listener can't receive init segment - abort
+			m.logger.Printf("WARNING: Could not send init segment to listener, channel full")
+			return
+		}
+	}
+
 	m.ringBufferMu.RLock()
 	defer m.ringBufferMu.RUnlock()
 
@@ -414,6 +435,24 @@ func (m *Mountpoint) GetStats() map[string]interface{} {
 		"bitrate":        m.bitrate,
 		"current_track":  metadata,
 	}
+}
+
+// SetContentType updates the content type of the mountpoint
+func (m *Mountpoint) SetContentType(contentType string) {
+	m.sourceMu.Lock()
+	defer m.sourceMu.Unlock()
+	m.contentType = contentType
+}
+
+// SetInitSegment stores the initialization segment for fMP4 streams
+// This segment will be sent to every new listener before media segments
+func (m *Mountpoint) SetInitSegment(data []byte) {
+	m.initSegmentMu.Lock()
+	defer m.initSegmentMu.Unlock()
+	// Make a copy to avoid external modifications
+	m.initSegment = make([]byte, len(data))
+	copy(m.initSegment, data)
+	m.logger.Printf("Init segment stored for %s (%d bytes)", m.path, len(data))
 }
 
 // MountpointManager manages all active mountpoints

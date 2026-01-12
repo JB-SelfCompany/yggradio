@@ -1,14 +1,23 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Radio, Shield, User, LogOut, Key } from 'lucide-react';
+import { Radio, Shield, User, LogOut, Key, Github } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import AudioPlayer from '../Player/AudioPlayer';
 import AuthModal from '../Auth/AuthModal';
+import { getServerInfo } from '../../lib/api';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { isAuthenticated, isAdmin, logout, publicKey } = useAuthStore();
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [version, setVersion] = useState<string>('');
+
+  useEffect(() => {
+    // Load server info to get version
+    getServerInfo()
+      .then((info) => setVersion(info.version))
+      .catch((error) => console.error('Failed to load server info:', error));
+  }, []);
 
   const navigation = [
     { name: 'Home', href: '/', icon: Radio },
@@ -123,6 +132,32 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Audio Player */}
       <AudioPlayer />
+
+      {/* Footer */}
+      <footer className="bg-gray-900 border-t border-gray-800 py-4">
+        <div className="container mx-auto px-4">
+          <div className="flex items-center justify-center sm:justify-between gap-4 text-sm text-gray-400">
+            <div className="flex items-center gap-2 order-2 sm:order-1">
+              <span>© 2026 JB-SelfCompany</span>
+              {version && (
+                <>
+                  <span className="text-gray-600">•</span>
+                  <span className="text-gray-500">v{version}</span>
+                </>
+              )}
+            </div>
+            <a
+              href="https://github.com/JB-SelfCompany/yggradio"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 hover:text-indigo-400 transition-colors order-1 sm:order-2 absolute sm:relative right-4 sm:right-auto"
+            >
+              <Github className="w-4 h-4" />
+              <span>GitHub</span>
+            </a>
+          </div>
+        </div>
+      </footer>
 
       {/* Auth Modal */}
       {showAuthModal && (

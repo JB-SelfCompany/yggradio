@@ -65,6 +65,11 @@ func (db *DB) migrate() error {
 		return fmt.Errorf("failed to execute schema: %w", err)
 	}
 
+	// Run incremental migrations from migrations/ folder
+	if err := RunMigrations(db.DB, db.logger); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
 	db.logger.Println("Database migrations completed")
 	return nil
 }

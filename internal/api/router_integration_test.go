@@ -127,7 +127,7 @@ func TestRouterIntegration_FederationDisabledClearCache(t *testing.T) {
 	// This should trigger cache cleanup in NewRouter()
 	instanceURL := "http://localhost:8080"
 
-	router := NewRouter(db, cfg, pubkey, privkey, yggAddr.String(), instanceURL, logger, nil)
+	router := NewRouter(db, cfg, pubkey, privkey, yggAddr.String(), instanceURL, "test-version", logger, nil)
 	if router == nil {
 		t.Fatal("NewRouter() returned nil")
 	}
@@ -196,7 +196,7 @@ func TestRouterIntegration_FederationServerChange(t *testing.T) {
 	// This should detect server change and clear cache
 	instanceURL := "http://localhost:8080"
 
-	router := NewRouter(db, cfg, pubkey, privkey, yggAddr.String(), instanceURL, logger, nil)
+	router := NewRouter(db, cfg, pubkey, privkey, yggAddr.String(), instanceURL, "test-version", logger, nil)
 	if router == nil {
 		t.Fatal("NewRouter() returned nil")
 	}
@@ -269,7 +269,7 @@ func TestRouterIntegration_FederationServerUnchanged(t *testing.T) {
 	// This should NOT clear cache
 	instanceURL := "http://localhost:8080"
 
-	router := NewRouter(db, cfg, pubkey, privkey, yggAddr.String(), instanceURL, logger, nil)
+	router := NewRouter(db, cfg, pubkey, privkey, yggAddr.String(), instanceURL, "test-version", logger, nil)
 	if router == nil {
 		t.Fatal("NewRouter() returned nil")
 	}
@@ -311,7 +311,7 @@ func TestRouterIntegration_StopGracefully(t *testing.T) {
 	logger := log.New(os.Stderr, "[test-router] ", log.LstdFlags)
 	instanceURL := "http://localhost:8080"
 
-	router := NewRouter(db, cfg, pubkey, privkey, yggAddr.String(), instanceURL, logger, nil)
+	router := NewRouter(db, cfg, pubkey, privkey, yggAddr.String(), instanceURL, "test-version", logger, nil)
 	if router == nil {
 		t.Fatal("NewRouter() returned nil")
 	}

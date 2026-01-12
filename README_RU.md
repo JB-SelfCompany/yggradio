@@ -4,7 +4,7 @@
 
 **Децентрализованная радиоплатформа в сети Yggdrasil**
 
-[![Версия](https://img.shields.io/badge/версия-1.0.0-blue.svg)](https://github.com/JB-SelfCompany/yggradio/releases)
+[![Версия](https://img.shields.io/badge/версия-1.1.0-blue.svg)](https://github.com/JB-SelfCompany/yggradio/releases)
 [![Go Version](https://img.shields.io/badge/go-1.21+-00ADD8.svg)](https://go.dev/)
 [![Лицензия](https://img.shields.io/badge/лицензия-GPLv3-green.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/JB-SelfCompany/yggradio/pulls)
@@ -71,17 +71,9 @@
 
 ### Из бинарного файла
 
-Скачайте последний релиз для вашей платформы:
+**[Скачать с GitHub Releases](https://github.com/JB-SelfCompany/yggradio/releases/latest)**
 
-```bash
-# Linux/macOS
-wget https://github.com/JB-SelfCompany/yggradio/releases/download/v1.0.0/yggradio-linux-amd64.tar.gz
-tar -xzf yggradio-linux-amd64.tar.gz
-sudo mv yggradio /usr/local/bin/
-
-# Windows
-# Скачайте со страницы релизов и добавьте в PATH
-```
+Выберите бинарный файл для вашей платформы (Linux, macOS или Windows), распакуйте его и добавьте в PATH.
 
 ### Из исходного кода
 
@@ -100,7 +92,9 @@ bash build.sh  # Linux/macOS
 
 Для production развертывания на Linux используйте systemd для запуска YggRadio как сервиса:
 
-#### Сервис YggRadio
+#### Сервис YggRadio (Обязательный)
+
+**Это основное приложение, которое вам нужно запустить.**
 
 ```bash
 # Создайте системного пользователя
@@ -135,7 +129,9 @@ sudo systemctl status yggradio
 sudo journalctl -u yggradio -f
 ```
 
-#### Сервис сервера федерации
+#### Сервис сервера федерации (Опционально - Только для продвинутых пользователей)
+
+> **⚠️ Примечание:** Этот сервис **опционален** и нужен только если вы хотите запустить собственный хаб обнаружения федерации. Большинству пользователей следует **пропустить этот раздел** и запускать только основной сервис YggRadio выше. Вы можете присоединиться к существующей федерации, настроив `federation.enabled: true` в вашем `config.yaml` без запуска сервера федерации.
 
 ```bash
 # Создайте системного пользователя
@@ -176,6 +172,8 @@ sudo journalctl -u yggradio-federation-server -f
 
 ## 🚀 Быстрый старт
 
+> **📝 Примечание:** Это руководство показывает, как запустить основное приложение YggRadio. Вам **не нужно** запускать сервер федерации - YggRadio отлично работает в автономном режиме!
+
 1. **Установите и запустите демон Yggdrasil:**
    ```bash
    # См.: https://yggdrasil-network.github.io/installation.html
@@ -199,146 +197,50 @@ sudo journalctl -u yggradio-federation-server -f
 
 ## 🔐 Аутентификация
 
-YggRadio поддерживает **два метода аутентификации** - выберите тот, который подходит вам:
+YggRadio поддерживает **два метода аутентификации**:
 
 ### Ключевые пары Ed25519
 
 **Криптографическая аутентификация с фокусом на приватность, без паролей**
 
-#### Ключи, сгенерированные в браузере (Быстро и просто)
-
-1. Нажмите **"Войти"** → **"Создать новые ключи"**
-2. **Сохраните ключи безопасно** (скачайте JSON файл)
-3. Ключи хранятся в `sessionStorage` (очищаются при закрытии браузера)
-
-#### Ключи, сгенерированные вручную (Максимальная безопасность)
-
-Для максимальной безопасности генерируйте ключи вне браузера:
-
-**Python (PyNaCl):**
-```bash
-python3 -c "import nacl.signing, base64; \
-key = nacl.signing.SigningKey.generate(); \
-print('Private:', base64.b64encode(bytes(key)).decode()); \
-print('Public:', base64.b64encode(bytes(key.verify_key)).decode())"
-```
-
-**Node.js (tweetnacl):**
-```bash
-node -e "const nacl = require('tweetnacl'); \
-const key = nacl.sign.keyPair(); \
-console.log('Private:', Buffer.from(key.secretKey).toString('base64')); \
-console.log('Public:', Buffer.from(key.publicKey).toString('base64'));"
-```
-
-**OpenSSL:**
-```bash
-openssl genpkey -algorithm ed25519 -out key.pem
-openssl pkey -in key.pem -pubout -out pubkey.pem
-# Примечание: Конвертируйте PEM в base64 вручную
-```
-
-**Импорт ключей:**
-1. Нажмите **"Войти"** → **"Импортировать ключи"**
-2. Вставьте ваши публичный и приватный ключи (формат base64)
-3. Или загрузите JSON файл
+- Нажмите **"Войти"** → **"Создать новые ключи"** или **"Импортировать ключи"**
+- Ключи хранятся в `sessionStorage` браузера (очищаются при закрытии)
+- Для максимальной безопасности генерируйте ключи вне браузера через PyNaCl, tweetnacl или OpenSSL
 
 **Безопасность:**
 - ✅ Приватные ключи никогда не покидают ваше устройство
-- ✅ Не нужно запоминать или хранить пароли
-- ✅ Криптографические подписи для каждого запроса
-- ✅ Автоматическая защита от replay-атак (5-минутное окно)
-
----
+- ✅ Пароли не требуются
+- ✅ Криптографические подписи с автоматической защитой от replay-атак
 
 ### Magic Link
 
 **Простая аутентификация через закладку для легкого доступа**
 
-#### Создание Magic Link
-
-1. Нажмите **"Войти"** → **"Magic Link"**
-2. Нажмите **"Сгенерировать Magic Link"**
-3. Дождитесь вычисления Proof-of-Work (~2-4 секунды)
-4. **Сохраните ссылку безопасно** (добавьте в закладки или скачайте)
-
-#### Использование Magic Link
-
-1. Перейдите по сохраненной ссылке в любом браузере
-2. Автоматически создается session cookie (срок действия 1 неделя)
-3. Заходите по ссылке в любое время для обновления сессии
+1. Нажмите **"Войти"** → **"Magic Link"** → **"Сгенерировать Magic Link"**
+2. Дождитесь вычисления Proof-of-Work (~2-4 секунды)
+3. Сохраните ссылку безопасно (закладка или менеджер паролей)
+4. Переходите по ссылке в любое время для аутентификации
 
 **Заметки о безопасности:**
-- ⚠️ **Любой, у кого есть ссылка, может получить доступ к вашему аккаунту** - храните её безопасно
-- 🔒 Magic link никогда не истекает, но cookies истекают (1 неделя)
-- 🔐 Токены и cookies хранятся как SHA256 хеши (192-бит и 256-бит энтропия)
-- 🛡️ Constant-time сравнение предотвращает timing-атаки
-- 📝 Рекомендуется: Храните в менеджере паролей или в закладках безопасно
-
-**Когда использовать:**
-- ✅ Быстрый доступ с нескольких устройств
-- ✅ Не хотите управлять криптографическими ключами
-- ✅ Предпочитаете аутентификацию в стиле закладок
-- ❌ Требуются максимальные требования безопасности (используйте Ed25519)
+- ⚠️ Любой со ссылкой может получить доступ к аккаунту
+- 🔒 Ссылка не истекает, cookies истекают через 1 неделю
+- ✅ Лучше для быстрого доступа с нескольких устройств
+- ❌ Для максимальной безопасности используйте Ed25519
 
 ---
 
 ## ⚙️ Конфигурация
 
-Расположение файла конфигурации: `~/.yggradio/config.yaml`
-
-При первом запуске YggRadio автоматически создает файл конфигурации по умолчанию. Вы также можете создать его вручную:
-
-```bash
-# Скопируйте пример конфигурации
-cp config.example.yaml ~/.yggradio/config.yaml
-
-# Отредактируйте конфигурацию
-nano ~/.yggradio/config.yaml
-```
+Файл конфигурации: `~/.yggradio/config.yaml` (создается автоматически при первом запуске)
 
 **Основные настройки:**
+- `server.port`: Порт веб-интерфейса (по умолчанию: 8080)
+- `server.bind`: IPv6 адрес (определяется автоматически)
+- `streaming.max_listeners_per_station`: Лимит слушателей (по умолчанию: 100)
+- `security.magic_link_enabled`: Включить magic link аутентификацию (по умолчанию: true)
+- `federation.enabled`: Присоединиться к сети федерации (по умолчанию: false)
 
-```yaml
-server:
-  port: 8080
-  bind: ""  # Автоопределение IPv6 адреса Yggdrasil
-  instance_name: "Моё YggRadio"
-
-streaming:
-  max_listeners_per_station: 100
-  max_source_clients: 10
-  buffer_size: 32768
-  server_secret: ""  # Автоматически генерируется при первом запуске
-
-security:
-  magic_link_enabled: true  # Включить аутентификацию magic link
-  magic_link_token_length: 24  # 24 байта = 48 hex символов (192 бита)
-  magic_link_cookie_ttl: 604800  # 1 неделя в секундах
-  magic_link_require_pow: true  # Требовать PoW для защиты от спама
-  magic_link_pow_difficulty: 16  # Такая же сложность как для создания станций
-
-federation:
-  enabled: false  # Установите в true для присоединения к федерации
-  server_address: "301:be28:cf55:3c9::10"
-  server_port: 9000
-```
-
-**Полный пример конфигурации:** См. [config.example.yaml](config.example.yaml)
-
-### Конфигурация сервера федерации
-
-Для запуска сервера федерации:
-
-```bash
-# Скопируйте пример конфигурации
-cp config-federation.example.yaml ~/.yggradio-federation/config.yaml
-
-# Отредактируйте конфигурацию
-nano ~/.yggradio-federation/config.yaml
-```
-
-**Полный пример конфигурации федерации:** См. [config-federation.example.yaml](config-federation.example.yaml)
+**Полные примеры конфигурации:** [config.example.yaml](config.example.yaml), [config-federation.example.yaml](config-federation.example.yaml)
 
 ---
 
@@ -346,69 +248,34 @@ nano ~/.yggradio-federation/config.yaml
 
 ### Трансляция
 
-Используйте любой клиент потокового вещания, поддерживающий HTTP стриминг:
+Используйте любой HTTP стриминг клиент (ffmpeg, OBS Studio, BUTT):
 
 **Пример с ffmpeg:**
 ```bash
-ffmpeg -re -i music.mp3 -codec:a libmp3lame -b:a 128k \
-  -f mp3 http://[ВАШ_YGGDRASIL_IP]:8080/your-mountpoint \
-  -user username -password ваш-пароль-источника
+ffmpeg -re -i audio.flac -codec:a libmp3lame -b:a 128k \
+  -f mp3 -content_type audio/mpeg -method PUT \
+  'http://username:password@[ВАШ_IP]:8080/mountpoint'
 ```
-
-**OBS Studio:**
-1. Настройки → Вещание
-2. Сервис: Пользовательский
-3. Сервер: `http://[ВАШ_YGGDRASIL_IP]:8080/your-mountpoint`
-4. Ключ потока: Используйте HTTP Basic Auth
-
-**BUTT (Broadcast Using This Tool):**
-1. Настройки → Сервер → Icecast
-2. Адрес: Ваш IPv6 адрес Yggdrasil
-3. Порт: 8080
-4. Точка монтирования: /your-mountpoint
 
 ### Прослушивание
 
-Откройте URL станции в вашем веб-браузере:
-```
-http://[YGGDRASIL_IP_ВЕЩАТЕЛЯ]:8080/
-```
-
-Веб-плеер автоматически загрузится и начнет воспроизведение.
+Откройте `http://[IP_ВЕЩАТЕЛЯ]:8080/` в браузере - веб-плеер загрузится автоматически.
 
 ---
 
 ## 🌐 Федерация
 
-Федерация позволяет инстансам YggRadio находить друг друга через центральный хаб.
+**Опционально** - YggRadio отлично работает автономно. Включайте федерацию только для обнаружения станций от других узлов.
 
-### Присоединение к федерации
-
-1. Отредактируйте `~/.yggradio/config.yaml`:
-   ```yaml
-   federation:
-     enabled: true
-     server_address: "301:be28:cf55:3c9::10"  # Адрес сервера федерации
-     server_port: 9000
-   ```
-
-2. Перезапустите YggRadio:
-   ```bash
-   sudo systemctl restart yggradio
-   ```
-
-### Запуск сервера федерации
-
-```bash
-# Установите сервер федерации
-sudo cp yggradio-federation-server /usr/local/bin/
-
-# Запустите через systemd
-sudo cp systemd/yggradio-federation-server.service /etc/systemd/system/
-sudo systemctl enable --now yggradio-federation-server
+**Присоединение к федерации:** Отредактируйте `~/.yggradio/config.yaml`:
+```yaml
+federation:
+  enabled: true
+  server_address: "301:be28:cf55:3c9::10"
+  server_port: 9000
 ```
 
-Конфигурация: `~/.yggradio-federation/config.yaml`
+**Запуск собственного сервера федерации:** См. файлы сервисов systemd и `config-federation.example.yaml`
 
 ---
 
@@ -419,23 +286,23 @@ sudo systemctl enable --now yggradio-federation-server
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Сеть Yggdrasil                        │
-│              (Зашифрованная Mesh-сеть)                   │
+│                    Сеть Yggdrasil                       │
+│              (Зашифрованная Mesh-сеть)                  │
 └─────────────────────────────────────────────────────────┘
                           │
     ┌─────────────────────┼─────────────────────┐
     │                     │                     │
-┌───▼────┐          ┌─────▼─────┐        ┌─────▼─────┐
-│Клиент  │          │ YggRadio  │        │ YggRadio  │
-│Браузер │◄────────►│   Узел 1  │        │   Узел 2  │
+┌───▼────┐          ┌─────▼──────┐        ┌─────▼──────┐
+│Клиент  │          │  YggRadio  │        │  YggRadio  │
+│Браузер │◄────────►│   Узел 1   │        │   Узел 2   │
 └────────┘          │(Автономный)│        │(Автономный)│
-                    └─────┬─────┘        └─────┬─────┘
-                          │                    │
-                          ▼                    ▼
-                     ┌─────────┐          ┌─────────┐
-                     │ SQLite  │          │ SQLite  │
-                     │   БД    │          │   БД    │
-                     └─────────┘          └─────────┘
+                    └─────┬──────┘        └─────┬──────┘
+                          │                     │
+                          ▼                     ▼
+                     ┌─────────┐           ┌─────────┐
+                     │ SQLite  │           │ SQLite  │
+                     │   БД    │           │   БД    │
+                     └─────────┘           └─────────┘
 ```
 
 ### Режим федерации (опционально)
@@ -451,15 +318,15 @@ sudo systemctl enable --now yggradio-federation-server
                           │
          ┌────────────────┼────────────────┐
          │                │                │
-    ┌────▼─────┐     ┌────▼─────┐    ┌────▼─────┐
-    │YggRadio 1│◄───►│YggRadio 2│◄───►│YggRadio 3│
-    │(Федератив)│     │(Федератив)│    │(Федератив)│
-    └────┬─────┘     └────┬─────┘    └────┬─────┘
-         │                │                │
-    ┌────▼─────┐     ┌────▼─────┐    ┌────▼─────┐
-    │ SQLite   │     │ SQLite   │    │ SQLite   │
-    │   БД     │     │   БД     │    │   БД     │
-    └──────────┘     └──────────┘    └──────────┘
+    ┌────▼──────┐     ┌────▼──────┐     ┌────▼──────┐
+    │YggRadio 1 │◄───►│YggRadio 2 │◄───►│YggRadio 3 │
+    │(Федератив)│     │(Федератив)│     │(Федератив)│
+    └────┬──────┘     └────┬──────┘     └────┬──────┘
+         │                 │                 │
+    ┌────▼─────┐      ┌────▼─────┐      ┌────▼─────┐
+    │ SQLite   │      │ SQLite   │      │ SQLite   │
+    │   БД     │      │   БД     │      │   БД     │
+    └──────────┘      └──────────┘      └──────────┘
 
     Узел 1 ◄──────► Узел 2 ◄──────► Узел 3
     (Прямой обмен станциями между узлами)
@@ -492,91 +359,21 @@ sudo systemctl enable --now yggradio-federation-server
 
 ## 🛠️ Разработка
 
-### Структура проекта
-
-```
-yggradio/
-├── cmd/
-│   ├── yggradio/                      # Основное приложение
-│   └── yggradio-federation-server/    # Сервер федерации
-├── internal/
-│   ├── api/
-│   │   ├── handlers/                  # Обработчики HTTP запросов
-│   │   └── middleware/                # Аутентификация, rate limiting, CSRF
-│   ├── config/                        # Управление конфигурацией
-│   ├── database/
-│   │   ├── models/                    # Репозитории базы данных
-│   │   └── schema.sql                 # Схема базы данных
-│   ├── federation_client/             # Клиент федерации
-│   ├── federation_server/             # Сервер федерации
-│   ├── moderation/                    # PoW и фильтрация контента
-│   ├── security/                      # Аутентификация, CSRF, валидация, санитизация
-│   ├── streaming/                     # HTTP стриминговый сервер
-│   ├── testutil/                      # Утилиты для тестирования
-│   ├── utils/                         # Вспомогательные функции
-│   └── web/
-│       └── dist/                      # Встроенный фронтенд (собранный)
-├── web/                               # Исходники React фронтенда
-│   ├── src/
-│   │   ├── components/                # React компоненты
-│   │   ├── lib/                       # API клиент, утилиты
-│   │   ├── pages/                     # Компоненты страниц
-│   │   └── stores/                    # Хранилища состояния Zustand
-│   └── dist/                          # Собранный фронтенд
-├── systemd/                           # Файлы сервисов systemd
-├── bin/                               # Скомпилированные бинарники (в gitignore)
-└── dist/                              # Архивы релизов (в gitignore)
-```
-
 ### Сборка
 
 ```bash
-# Полная сборка (фронтенд + бэкенд для всех платформ)
-bash build.sh
-
-# Только бэкенд
-go build -o bin/yggradio ./cmd/yggradio
-
-# Только фронтенд
-cd web && npm run build
-
-# Dev-сервер фронтенда (с hot reload)
-cd web && npm run dev
-
-# Бэкенд с авто-перезагрузкой (требуется air)
-air
+bash build.sh                          # Полная сборка (все платформы)
+go build -o bin/yggradio ./cmd/yggradio  # Только бэкенд
+cd web && npm run build                # Только фронтенд
+cd web && npm run dev                  # Dev-сервер с hot reload
 ```
 
 ### Тестирование
 
 ```bash
-# Все тесты с race detector
-go test -v -race ./...
-
-# Только юнит-тесты (быстро)
-go test -v -race -short ./...
-
-# Тесты безопасности
-go test -v -race ./internal/security/...
-
-# Тесты фронтенда
-cd web && npm test
-
-# Отчет о покрытии
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-```
-
-### Качество кода
-
-```bash
-# Форматирование
-go fmt ./...
-
-# Линтинг
-go vet ./...
-cd web && npm run lint
-
+go test -v -race ./...                 # Все тесты
+go test -v -race -short ./...          # Только юнит-тесты
+cd web && npm test                     # Тесты фронтенда
 ```
 
 ---

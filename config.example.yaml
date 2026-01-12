@@ -56,6 +56,22 @@ streaming:
   # DO NOT share this secret - it's used for HMAC authentication
   server_secret: ""
 
+  # Allow stations to relay external HTTP/HLS streams
+  external_streams_enabled: true
+
+  # Maximum concurrent external streams (to prevent resource exhaustion)
+  max_external_streams: 10
+
+  # Timeout for external HTTP requests (seconds)
+  external_stream_timeout: 60
+
+  # Number of reconnection attempts for failed streams
+  external_stream_reconnect_attempts: 3
+
+  # Health check interval for external streams (seconds)
+  # Check if streams are still delivering data
+  external_stream_health_check_interval: 60
+
 # Moderation Configuration
 moderation:
   # Proof-of-Work difficulty for account creation (bits)
@@ -80,7 +96,7 @@ federation:
   server_port: 9000
 
   # How often to register with federation server (seconds)
-  register_interval: 120  # 2 minutes
+  register_interval: 450  # 7.5 minutes
 
   # How often to query for new stations (seconds)
   query_interval: 60  # 1 minute

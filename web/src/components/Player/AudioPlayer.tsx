@@ -3,10 +3,12 @@ import { usePlayerStore } from '../../stores/playerStore';
 import { Play, Pause, Square, Volume2, VolumeX } from 'lucide-react';
 import { MSEAudioPlayer, detectMimeType } from '../../lib/mse-player';
 import { isYggdrasilStream } from '../../lib/utils';
+import Hls from 'hls.js';
 
 export default function AudioPlayer() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const playerRef = useRef<MSEAudioPlayer | null>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [bufferStatus, setBufferStatus] = useState<string>('Connecting...');
 
@@ -48,19 +50,19 @@ export default function AudioPlayer() {
     };
 
     const handleWaiting = () => {
-      console.log('Audio is buffering...');
+      // Audio is buffering
     };
 
     const handleCanPlay = () => {
-      console.log('Audio can play');
+      // Audio can play
     };
 
     const handlePlaying = () => {
-      console.log('Audio is playing');
+      // Audio is playing
     };
 
     const handleStalled = () => {
-      console.log('Audio stream stalled');
+      // Audio stream stalled
     };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
@@ -89,17 +91,68 @@ export default function AudioPlayer() {
     const audio = audioRef.current;
     if (!audio || !currentStreamUrl) return;
 
-    // Cleanup previous MSE player if exists
+    // Cleanup previous players
     if (playerRef.current) {
       playerRef.current.destroy();
       playerRef.current = null;
     }
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    // Check if this is an HLS external stream (use proxy URL)
+    const isExternalHLS = currentStation?.external_stream_type === 'hls' &&
+                          currentStation?.hls_proxy_url;
 
     // Use MSE for Yggdrasil streams to get full buffer control
     const isYggdrasil = isYggdrasilStream(currentStreamUrl);
 
-    if (isYggdrasil && currentStation) {
-      console.log('Using MSE player for Yggdrasil stream');
+    if (isExternalHLS && Hls.isSupported()) {
+      // Use HLS.js for external HLS streams via proxy
+      const hls = new Hls({
+        debug: false,
+        enableWorker: true,
+        lowLatencyMode: false,
+        backBufferLength: 90,
+      });
+
+      hlsRef.current = hls;
+
+      // Use the proxy URL from currentStreamUrl (already set in playerStore)
+      hls.loadSource(currentStreamUrl);
+      hls.attachMedia(audio);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (isPlaying) {
+          audio.play().catch((error) => {
+            console.error('Failed to play HLS audio:', error);
+            pause();
+          });
+        }
+      });
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              // Network error, trying to recover
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              // Media error, trying to recover
+              hls.recoverMediaError();
+              break;
+            default:
+              // Fatal error, cannot recover
+              console.error('HLS fatal error:', data.type);
+              pause();
+              break;
+          }
+        }
+      });
+    } else if (isYggdrasil && currentStation) {
+      // Using MSE player for Yggdrasil stream
 
       // Detect MIME type from station content type or default to MP3
       const mimeType = detectMimeType(currentStation.content_type || 'audio/mpeg');
@@ -110,8 +163,7 @@ export default function AudioPlayer() {
       // For Yggdrasil: can start playing after just 1.5 seconds buffered
       playerRef.current.setMinBufferSeconds(1.5);
     } else {
-      // Direct playback for regular internet
-      console.log('Using direct audio element for regular stream');
+      // Direct playback for regular internet or native HLS support
       audio.src = currentStreamUrl;
       audio.load();
 
@@ -127,6 +179,10 @@ export default function AudioPlayer() {
       if (playerRef.current) {
         playerRef.current.destroy();
         playerRef.current = null;
+      }
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
       }
     };
   }, [currentStreamUrl, currentStation, isPlaying, pause]);
@@ -163,7 +219,7 @@ export default function AudioPlayer() {
       setMetadata(currentStation.metadata_title);
     }
 
-    // Poll every 2 seconds for metadata updates
+    // Poll every 10 seconds for metadata updates
     const pollInterval = setInterval(async () => {
       try {
         // For federated stations, we need to fetch from the stations list
@@ -190,9 +246,9 @@ export default function AudioPlayer() {
           }
         }
       } catch (error) {
-        console.error('Failed to fetch metadata update:', error);
+        // Silently fail - metadata updates are not critical
       }
-    }, 2000);
+    }, 10000);
 
     return () => clearInterval(pollInterval);
   }, [currentStation, isPlaying, setMetadata]);
@@ -320,9 +376,11 @@ export default function AudioPlayer() {
     return null;
   }
 
-  // For radio stations: show current track as title, station name as subtitle
-  const displayTitle = currentMetadata || currentStation?.name || 'Unknown';
-  const displaySubtitle = currentMetadata ? currentStation?.name : 'No track info';
+  // For radio stations: always show track info on top, station name on bottom
+  // Top: track title (or "No track info" if unavailable)
+  // Bottom: station name
+  const displayTitle = currentMetadata || 'No track info';
+  const displaySubtitle = currentStation?.name || 'Unknown Station';
 
   return (
     <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-700 shadow-lg z-50">

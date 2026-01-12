@@ -21,6 +21,9 @@ export interface Station {
   playlist_mode?: 'sequential' | 'shuffle';
   playlist_loop?: boolean;
   playlist_file_pattern?: string;
+  external_stream_url?: string | null; // URL of external stream (HLS or direct)
+  external_stream_type?: 'hls' | 'direct' | null; // Type of external stream
+  hls_proxy_url?: string | null; // Proxy URL for HLS streams (for browser playback)
 }
 
 interface PlayerState {
@@ -60,13 +63,21 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   currentMetadata: null,
 
   playStation: (station: Station) => {
-    const streamUrl = `${window.location.origin}${station.mountpoint}`;
+    // For HLS external streams, use proxy URL if available
+    let streamUrl: string;
+    if (station.external_stream_type === 'hls' && station.hls_proxy_url) {
+      streamUrl = `${window.location.origin}${station.hls_proxy_url}`;
+    } else {
+      streamUrl = `${window.location.origin}${station.mountpoint}`;
+    }
+
     set({
       currentStation: station,
       currentStreamUrl: streamUrl,
       isPlaying: true,
       currentTime: 0,
       duration: 0,
+      currentMetadata: null, // Reset metadata when switching stations
     });
   },
 

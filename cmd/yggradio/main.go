@@ -23,7 +23,7 @@ import (
 
 var (
 	// Version is set at build time
-	Version = "1.0.0"
+	Version = "1.1.0"
 
 	// Command line flags
 	configPath = flag.String("config", "~/.yggradio/config.yaml", "Path to configuration file")
@@ -56,6 +56,11 @@ func main() {
 		logger.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
+
+	// Apply database migrations
+	if err := database.RunMigrations(db.DB, logger); err != nil {
+		logger.Fatalf("Failed to run migrations: %v", err)
+	}
 
 	// Load or generate Ed25519 keypair for authentication
 	crypto := security.NewCryptoUtil()
@@ -121,8 +126,13 @@ func main() {
 	}
 	defer streamingServer.Stop(30 * time.Second)
 
+	// Start external stream monitor (v1.1.0+)
+	monitorCtx, monitorCancel := context.WithCancel(context.Background())
+	defer monitorCancel()
+	go streamingServer.StartExternalStreamMonitor(monitorCtx, 60*time.Second)
+
 	// Initialize HTTP router
-	router := api.NewRouter(db, cfg, pubkey, privkey, yggAddr.String(), instanceURL, logger, streamingServer)
+	router := api.NewRouter(db, cfg, pubkey, privkey, yggAddr.String(), instanceURL, Version, logger, streamingServer)
 	handler := router.Setup()
 	defer router.Stop() // Stop federation components on shutdown
 

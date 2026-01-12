@@ -142,9 +142,14 @@ const RatingComponent: React.FC<RatingComponentProps> = ({
   // Display rating: hover preview OR average rating
   const displayRating = hoverRating || stats?.average_rating || 0;
 
+  // Helper function to round rating to nearest quarter
+  const roundToQuarter = (value: number): number => {
+    return Math.round(value * 4) / 4;
+  };
+
   // Helper function to determine star fill
   const getStarFill = (starIndex: number): 'full' | 'partial' | 'empty' => {
-    const rating = displayRating;
+    const rating = roundToQuarter(displayRating);
     if (starIndex <= Math.floor(rating)) {
       return 'full';
     } else if (starIndex === Math.ceil(rating) && rating % 1 !== 0) {
@@ -153,11 +158,13 @@ const RatingComponent: React.FC<RatingComponentProps> = ({
     return 'empty';
   };
 
-  // Get fill percentage for partial stars
+  // Get fill percentage for partial stars (rounded to quarters: 25%, 50%, 75%)
   const getPartialFillPercentage = (starIndex: number): number => {
-    const rating = displayRating;
+    const rating = roundToQuarter(displayRating);
     if (starIndex === Math.ceil(rating)) {
-      return (rating % 1) * 100;
+      const fraction = rating % 1;
+      // Round to nearest quarter: 0.25 -> 25%, 0.5 -> 50%, 0.75 -> 75%
+      return fraction * 100;
     }
     return 0;
   };
@@ -232,7 +239,7 @@ const RatingComponent: React.FC<RatingComponentProps> = ({
         <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
           <span className="font-medium">
             {stats.average_rating > 0
-              ? stats.average_rating.toFixed(1)
+              ? `${stats.average_rating.toFixed(2)} / 5.00`
               : 'No ratings'}
           </span>
           {stats.vote_count > 0 && (

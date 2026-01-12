@@ -71,10 +71,37 @@ func (h *RatingHandler) SubmitRating(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract authenticated user's pubkey from context
-	pubkey, ok := r.Context().Value("pubkey").(string)
-	if !ok || pubkey == "" {
-		h.logger.Printf("ERROR: Missing pubkey in context for rating submission")
+	// Get authenticated user - supports both Ed25519 and Magic Link authentication
+	var userPubkey string
+	var userID int64
+
+	// Try to get user_id first (works for both auth methods)
+	if uid, ok := r.Context().Value("user_id").(int64); ok {
+		userID = uid
+	} else {
+		h.logger.Printf("ERROR: Missing user_id in context for rating submission")
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Check auth method to determine how to get user pubkey
+	authMethod, _ := r.Context().Value("auth_method").(string)
+
+	if authMethod == "ed25519" {
+		// Ed25519 users: use their actual public key
+		if pubkey, ok := r.Context().Value("pubkey").(string); ok {
+			userPubkey = pubkey
+		} else {
+			h.logger.Printf("ERROR: Ed25519 auth but no pubkey in context")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	} else if authMethod == "magic_link" {
+		// Magic link users: generate synthetic pubkey from user_id
+		// Format: "magiclink:<user_id>" (64 hex chars padded)
+		userPubkey = fmt.Sprintf("magiclink:%054d", userID)
+	} else {
+		h.logger.Printf("ERROR: Unknown auth_method for rating: %s", authMethod)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -117,8 +144,8 @@ func (h *RatingHandler) SubmitRating(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if station owner is trying to rate their own station
-	if station.OwnerPubkey == pubkey {
-		h.logger.Printf("SECURITY: Owner %s attempted to rate own station %d", pubkey, stationID)
+	if station.OwnerPubkey == userPubkey {
+		h.logger.Printf("SECURITY: Owner %s attempted to rate own station %d", userPubkey, stationID)
 		http.Error(w, "You cannot rate your own station", http.StatusForbidden)
 		return
 	}
@@ -135,53 +162,53 @@ func (h *RatingHandler) SubmitRating(w http.ResponseWriter, r *http.Request) {
 
 	// Validate rating is in range [1, 5]
 	if req.Rating < 1 || req.Rating > 5 {
-		h.logger.Printf("ERROR: Invalid rating value %d from user %s", req.Rating, pubkey)
+		h.logger.Printf("ERROR: Invalid rating value %d from user %s", req.Rating, userPubkey)
 		http.Error(w, "Rating must be between 1 and 5", http.StatusBadRequest)
 		return
 	}
 
 	// SPAM PROTECTION: Check for duplicate ratings from same IPv6 address
-	isDuplicateIPv6, err := h.ratingRepo.CheckIPv6Duplicate("station", stationID, pubkey, userIPv6)
+	isDuplicateIPv6, err := h.ratingRepo.CheckIPv6Duplicate("station", stationID, userPubkey, userIPv6)
 	if err != nil {
 		h.logger.Printf("ERROR: Failed to check IPv6 duplicate: %v", err)
 		http.Error(w, "Failed to validate request", http.StatusInternalServerError)
 		return
 	}
 	if isDuplicateIPv6 {
-		h.logger.Printf("SECURITY: Duplicate rating attempt from IPv6 %s for station %d (pubkey %s)", userIPv6, stationID, pubkey)
+		h.logger.Printf("SECURITY: Duplicate rating attempt from IPv6 %s for station %d (pubkey %s)", userIPv6, stationID, userPubkey)
 		http.Error(w, "You can rate this station only once", http.StatusForbidden)
 		return
 	}
 
 	// SPAM PROTECTION: Check for duplicate ratings from same subnet
-	isDuplicateSubnet, err := h.ratingRepo.CheckSubnetDuplicate("station", stationID, pubkey, userIPv6Subnet)
+	isDuplicateSubnet, err := h.ratingRepo.CheckSubnetDuplicate("station", stationID, userPubkey, userIPv6Subnet)
 	if err != nil {
 		h.logger.Printf("ERROR: Failed to check subnet duplicate: %v", err)
 		http.Error(w, "Failed to validate request", http.StatusInternalServerError)
 		return
 	}
 	if isDuplicateSubnet {
-		h.logger.Printf("SECURITY: Duplicate rating attempt from subnet %s for station %d (pubkey %s)", userIPv6Subnet, stationID, pubkey)
+		h.logger.Printf("SECURITY: Duplicate rating attempt from subnet %s for station %d (pubkey %s)", userIPv6Subnet, stationID, userPubkey)
 		http.Error(w, "You can rate this station only once", http.StatusForbidden)
 		return
 	}
 
 	// Upsert rating (creates new or updates existing)
-	if err := h.ratingRepo.UpsertRating("station", stationID, pubkey, userIPv6, userIPv6Subnet, req.Rating); err != nil {
-		h.logger.Printf("ERROR: Failed to upsert rating for station %d by user %s: %v", stationID, pubkey, err)
+	if err := h.ratingRepo.UpsertRating("station", stationID, userPubkey, userIPv6, userIPv6Subnet, req.Rating); err != nil {
+		h.logger.Printf("ERROR: Failed to upsert rating for station %d by user %s: %v", stationID, userPubkey, err)
 		http.Error(w, "Failed to save rating", http.StatusInternalServerError)
 		return
 	}
 
 	// Get updated statistics
-	stats, err := h.ratingRepo.GetStationRatings(stationID, pubkey)
+	stats, err := h.ratingRepo.GetStationRatings(stationID, userPubkey)
 	if err != nil {
 		h.logger.Printf("ERROR: Failed to get updated stats for station %d: %v", stationID, err)
 		http.Error(w, "Failed to retrieve updated statistics", http.StatusInternalServerError)
 		return
 	}
 
-	h.logger.Printf("Rating submitted: station=%d, user=%s, ipv6=%s, subnet=%s, rating=%d", stationID, pubkey, userIPv6, userIPv6Subnet, req.Rating)
+	h.logger.Printf("Rating submitted: station=%d, user=%s, ipv6=%s, subnet=%s, rating=%d", stationID, userPubkey, userIPv6, userIPv6Subnet, req.Rating)
 
 	// Return success with updated stats
 	w.Header().Set("Content-Type", "application/json")
@@ -247,10 +274,36 @@ func (h *RatingHandler) GetMyRating(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract authenticated user's pubkey from context
-	pubkey, ok := r.Context().Value("pubkey").(string)
-	if !ok || pubkey == "" {
-		h.logger.Printf("ERROR: Missing pubkey in context for getting user rating")
+	// Get authenticated user - supports both Ed25519 and Magic Link authentication
+	var userPubkey string
+	var userID int64
+
+	// Try to get user_id first (works for both auth methods)
+	if uid, ok := r.Context().Value("user_id").(int64); ok {
+		userID = uid
+	} else {
+		h.logger.Printf("ERROR: Missing user_id in context for getting user rating")
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Check auth method to determine how to get user pubkey
+	authMethod, _ := r.Context().Value("auth_method").(string)
+
+	if authMethod == "ed25519" {
+		// Ed25519 users: use their actual public key
+		if pubkey, ok := r.Context().Value("pubkey").(string); ok {
+			userPubkey = pubkey
+		} else {
+			h.logger.Printf("ERROR: Ed25519 auth but no pubkey in context")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	} else if authMethod == "magic_link" {
+		// Magic link users: generate synthetic pubkey from user_id
+		userPubkey = fmt.Sprintf("magiclink:%054d", userID)
+	} else {
+		h.logger.Printf("ERROR: Unknown auth_method for getting user rating: %s", authMethod)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -277,7 +330,7 @@ func (h *RatingHandler) GetMyRating(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user's rating
-	userRating, err := h.ratingRepo.GetUserRating("station", stationID, pubkey)
+	userRating, err := h.ratingRepo.GetUserRating("station", stationID, userPubkey)
 	if err != nil {
 		h.logger.Printf("ERROR: Failed to get user rating for station %d: %v", stationID, err)
 		http.Error(w, "Failed to retrieve user rating", http.StatusInternalServerError)
@@ -320,10 +373,36 @@ func (h *RatingHandler) SubmitFederatedRating(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Extract authenticated user's pubkey from context
-	pubkey, ok := r.Context().Value("pubkey").(string)
-	if !ok || pubkey == "" {
-		h.logger.Printf("ERROR: Missing pubkey in context for federated rating submission")
+	// Get authenticated user - supports both Ed25519 and Magic Link authentication
+	var userPubkey string
+	var userID int64
+
+	// Try to get user_id first (works for both auth methods)
+	if uid, ok := r.Context().Value("user_id").(int64); ok {
+		userID = uid
+	} else {
+		h.logger.Printf("ERROR: Missing user_id in context for federated rating submission")
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Check auth method to determine how to get user pubkey
+	authMethod, _ := r.Context().Value("auth_method").(string)
+
+	if authMethod == "ed25519" {
+		// Ed25519 users: use their actual public key
+		if pubkey, ok := r.Context().Value("pubkey").(string); ok {
+			userPubkey = pubkey
+		} else {
+			h.logger.Printf("ERROR: Ed25519 auth but no pubkey in context")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	} else if authMethod == "magic_link" {
+		// Magic link users: generate synthetic pubkey from user_id
+		userPubkey = fmt.Sprintf("magiclink:%054d", userID)
+	} else {
+		h.logger.Printf("ERROR: Unknown auth_method for federated rating: %s", authMethod)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -366,8 +445,8 @@ func (h *RatingHandler) SubmitFederatedRating(w http.ResponseWriter, r *http.Req
 	}
 
 	// Check if user is trying to rate their own station
-	if federatedStation.OwnerPubkey == pubkey {
-		h.logger.Printf("SECURITY: Owner %s attempted to rate own federated station %s", pubkey, stationUUID)
+	if federatedStation.OwnerPubkey == userPubkey {
+		h.logger.Printf("SECURITY: Owner %s attempted to rate own federated station %s", userPubkey, stationUUID)
 		http.Error(w, "You cannot rate your own station", http.StatusForbidden)
 		return
 	}
@@ -384,7 +463,7 @@ func (h *RatingHandler) SubmitFederatedRating(w http.ResponseWriter, r *http.Req
 
 	// Validate rating is in range [1, 5]
 	if req.Rating < 1 || req.Rating > 5 {
-		h.logger.Printf("ERROR: Invalid rating value %d from user %s", req.Rating, pubkey)
+		h.logger.Printf("ERROR: Invalid rating value %d from user %s", req.Rating, userPubkey)
 		http.Error(w, "Rating must be between 1 and 5", http.StatusBadRequest)
 		return
 	}
@@ -399,13 +478,13 @@ func (h *RatingHandler) SubmitFederatedRating(w http.ResponseWriter, r *http.Req
 	nodeAddress := federatedStation.SourceNodeAddress.String
 
 	// Forward rating to source node
-	if err := h.forwardRatingToSourceNode(nodeAddress, stationUUID, pubkey, req.Rating); err != nil {
+	if err := h.forwardRatingToSourceNode(nodeAddress, stationUUID, userPubkey, req.Rating); err != nil {
 		h.logger.Printf("ERROR: Failed to forward rating to source node %s: %v", nodeAddress, err)
 		http.Error(w, "Failed to submit rating to source node", http.StatusBadGateway)
 		return
 	}
 
-	h.logger.Printf("Federated rating forwarded: station=%s, user=%s, node=%s, rating=%d", stationUUID, pubkey, nodeAddress, req.Rating)
+	h.logger.Printf("Federated rating forwarded: station=%s, user=%s, node=%s, rating=%d", stationUUID, userPubkey, nodeAddress, req.Rating)
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")

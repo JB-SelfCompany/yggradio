@@ -2,6 +2,7 @@ package streaming
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -17,17 +18,19 @@ import (
 
 // Server represents the Icecast-compatible streaming server
 type Server struct {
-	db              *database.DB
-	config          *config.StreamingConfig
-	rateLimitConfig *config.RateLimitConfig
-	mpManager       *MountpointManager
-	sourceHandler   *SourceHandler
-	listenerHandler *ListenerHandler
-	rateLimiter     *middleware.RateLimiter
-	validator       *security.Validator
-	sanitizer       *security.Sanitizer
-	auditLogger     *security.AuditLogger
-	logger          *log.Logger
+	db                    *database.DB
+	config                *config.StreamingConfig
+	rateLimitConfig       *config.RateLimitConfig
+	mpManager             *MountpointManager
+	sourceHandler         *SourceHandler
+	listenerHandler       *ListenerHandler
+	rateLimiter           *middleware.RateLimiter
+	validator             *security.Validator
+	sanitizer             *security.Sanitizer
+	auditLogger           *security.AuditLogger
+	logger                *log.Logger
+	externalStreamManager *ExternalStreamManager // v1.1.0+
+	hlsProxy              *HLSProxy              // HLS proxy for external streams
 
 	// Server state
 	running bool
@@ -78,19 +81,27 @@ func NewServer(
 		logger,
 	)
 
+	// Create external stream manager (v1.1.0+)
+	externalStreamManager := NewExternalStreamManager(logger, 60*time.Second)
+
+	// Create HLS proxy for external streams
+	hlsProxy := NewHLSProxy(logger, 30*time.Second)
+
 	return &Server{
-		db:              db,
-		config:          cfg,
-		rateLimitConfig: rateLimitCfg,
-		mpManager:       mpManager,
-		sourceHandler:   sourceHandler,
-		listenerHandler: listenerHandler,
-		rateLimiter:     rateLimiter,
-		validator:       validator,
-		sanitizer:       sanitizer,
-		auditLogger:     auditLogger,
-		logger:          logger,
-		running:         false,
+		db:                    db,
+		config:                cfg,
+		rateLimitConfig:       rateLimitCfg,
+		mpManager:             mpManager,
+		sourceHandler:         sourceHandler,
+		listenerHandler:       listenerHandler,
+		rateLimiter:           rateLimiter,
+		validator:             validator,
+		sanitizer:             sanitizer,
+		auditLogger:           auditLogger,
+		logger:                logger,
+		externalStreamManager: externalStreamManager,
+		hlsProxy:              hlsProxy,
+		running:               false,
 	}
 }
 
@@ -112,7 +123,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleSourceRequest(w, r)
 
 	case http.MethodGet:
-		// Check if this is a playlist request - NOT SUPPORTED
+		// Check if this is an HLS proxy request
+		if strings.HasPrefix(r.URL.Path, "/proxy/hls/") {
+			s.handleHLSProxyRequest(w, r)
+			return
+		}
+
+		// Check if this is a playlist request - NOT SUPPORTED (except proxy)
 		if strings.HasSuffix(r.URL.Path, ".m3u") || strings.HasSuffix(r.URL.Path, ".m3u8") || strings.HasSuffix(r.URL.Path, ".pls") {
 			http.Error(w, "Playlist files not supported. Use web player.", http.StatusNotFound)
 			return
@@ -251,6 +268,31 @@ func (s *Server) handleOptionsRequest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Expose-Headers", "Content-Type, Content-Length")
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleHLSProxyRequest handles HLS proxy requests for external streams
+func (s *Server) handleHLSProxyRequest(w http.ResponseWriter, r *http.Request) {
+	// Path format: /proxy/hls/{mountpoint}/playlist.m3u8 or /proxy/hls/{mountpoint}/segment?url=...
+	path := r.URL.Path
+
+	// Remove /proxy/hls prefix
+	path = strings.TrimPrefix(path, "/proxy/hls")
+
+	// Check if this is a segment request
+	if strings.HasSuffix(path, "/segment") {
+		s.hlsProxy.ProxySegment(w, r)
+		return
+	}
+
+	// Otherwise, it's a playlist request
+	// Extract mountpoint (everything before /playlist.m3u8)
+	mountpoint := path
+	if strings.HasSuffix(mountpoint, "/playlist.m3u8") {
+		mountpoint = strings.TrimSuffix(mountpoint, "/playlist.m3u8")
+	}
+
+	// Proxy the playlist
+	s.hlsProxy.ProxyPlaylist(w, r, mountpoint)
 }
 
 // setSecurityHeaders sets security headers for all responses
@@ -539,4 +581,177 @@ func (s *Server) GetDetailedStats() *StreamingStats {
 		Mountpoints:    mountpointStats,
 		ServerStatus:   status,
 	}
+}
+
+// StartExternalStreamMonitor starts background monitoring of external streams (v1.1.0+)
+// Checks stations with external_stream_url configured and automatically starts streams
+func (s *Server) StartExternalStreamMonitor(ctx context.Context, checkInterval time.Duration) {
+	s.logger.Printf("[ExternalStreamMonitor] Starting monitor (interval: %v)", checkInterval)
+
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.logger.Printf("[ExternalStreamMonitor] Stopped")
+			// Stop all active external streams
+			s.externalStreamManager.StopAll()
+			return
+
+		case <-ticker.C:
+			s.checkAndStartExternalStreams(ctx)
+		}
+	}
+}
+
+// checkAndStartExternalStreams checks all stations with external URLs and starts streams if needed
+func (s *Server) checkAndStartExternalStreams(ctx context.Context) {
+	// Query stations with external_stream_url configured AND auto_start enabled
+	query := `
+		SELECT id, mountpoint, external_stream_url, external_stream_type, content_type
+		FROM stations
+		WHERE external_stream_url IS NOT NULL
+		  AND external_stream_url != ''
+		  AND COALESCE(auto_start, 1) = 1
+	`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		s.logger.Printf("[ExternalStreamMonitor] ERROR: Failed to query stations: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	checkedCount := 0
+	startedCount := 0
+
+	for rows.Next() {
+		var stationID int64
+		var mountpoint string
+		var externalURL, streamType, contentType sql.NullString
+
+		if err := rows.Scan(&stationID, &mountpoint, &externalURL, &streamType, &contentType); err != nil {
+			s.logger.Printf("[ExternalStreamMonitor] ERROR: Failed to scan row: %v", err)
+			continue
+		}
+
+		if !externalURL.Valid || externalURL.String == "" {
+			continue
+		}
+
+		checkedCount++
+
+		// Check if mountpoint exists and is online
+		mp, exists := s.mpManager.Get(mountpoint)
+		if exists && mp.IsOnline() {
+			// Mountpoint already has a source - skip
+			continue
+		}
+
+		// Check if external stream is already active
+		if s.externalStreamManager.IsStreamActive(mountpoint) {
+			// Stream already running - skip
+			continue
+		}
+
+		// Start external stream
+		streamTypeStr := "direct" // default
+		if streamType.Valid && streamType.String != "" {
+			streamTypeStr = strings.ToLower(streamType.String)
+		}
+
+		contentTypeStr := "audio/mpeg" // default
+		if contentType.Valid && contentType.String != "" {
+			contentTypeStr = contentType.String
+		}
+
+		s.logger.Printf("[ExternalStreamMonitor] Starting external stream for %s (type: %s, url: %s)",
+			mountpoint, streamTypeStr, externalURL.String)
+
+		var startErr error
+		if streamTypeStr == "hls" {
+			startErr = s.externalStreamManager.StartHLSStream(ctx, externalURL.String, mountpoint, s)
+			// Register stream URL in HLS proxy for browser playback
+			if startErr == nil {
+				s.hlsProxy.RegisterStream(mountpoint, externalURL.String)
+			}
+		} else {
+			startErr = s.externalStreamManager.StartDirectStream(ctx, externalURL.String, mountpoint, contentTypeStr, s)
+		}
+
+		if startErr != nil {
+			s.logger.Printf("[ExternalStreamMonitor] ERROR: Failed to start stream for %s: %v", mountpoint, startErr)
+		} else {
+			startedCount++
+		}
+	}
+
+	if checkedCount > 0 {
+		s.logger.Printf("[ExternalStreamMonitor] Checked %d stations, started %d new streams", checkedCount, startedCount)
+	}
+}
+
+// StopExternalStream stops an active external stream (v1.1.0+)
+func (s *Server) StopExternalStream(mountpoint string) {
+	s.externalStreamManager.StopStream(mountpoint)
+	s.logger.Printf("[ExternalStream] Stopped external stream for %s", mountpoint)
+}
+
+// StartExternalStream starts an external stream for a station (v1.1.0+)
+func (s *Server) StartExternalStream(mountpoint string) error {
+	// Query station info from database
+	var externalURL, streamType, contentType sql.NullString
+	query := `SELECT external_stream_url, external_stream_type, content_type
+	          FROM stations
+	          WHERE mountpoint = ? AND external_stream_url IS NOT NULL`
+
+	err := s.db.QueryRow(query, mountpoint).Scan(&externalURL, &streamType, &contentType)
+	if err != nil {
+		return fmt.Errorf("failed to query station: %w", err)
+	}
+
+	if !externalURL.Valid || externalURL.String == "" {
+		return fmt.Errorf("station has no external stream URL")
+	}
+
+	// Check if already active
+	if s.externalStreamManager.IsStreamActive(mountpoint) {
+		return fmt.Errorf("external stream already active")
+	}
+
+	// Start the stream
+	streamTypeStr := "direct" // default
+	if streamType.Valid && streamType.String != "" {
+		streamTypeStr = strings.ToLower(streamType.String)
+	}
+
+	contentTypeStr := "audio/mpeg" // default
+	if contentType.Valid && contentType.String != "" {
+		contentTypeStr = contentType.String
+	}
+
+	s.logger.Printf("[ExternalStream] Starting external stream for %s (type: %s, url: %s)",
+		mountpoint, streamTypeStr, externalURL.String)
+
+	// Use background context for stream lifecycle
+	ctx := context.Background()
+
+	var startErr error
+	if streamTypeStr == "hls" {
+		startErr = s.externalStreamManager.StartHLSStream(ctx, externalURL.String, mountpoint, s)
+		// Register stream URL in HLS proxy for browser playback
+		if startErr == nil {
+			s.hlsProxy.RegisterStream(mountpoint, externalURL.String)
+		}
+	} else {
+		startErr = s.externalStreamManager.StartDirectStream(ctx, externalURL.String, mountpoint, contentTypeStr, s)
+	}
+
+	return startErr
+}
+
+// IsExternalStreamActive checks if an external stream is currently active (v1.1.0+)
+func (s *Server) IsExternalStreamActive(mountpoint string) bool {
+	return s.externalStreamManager.IsStreamActive(mountpoint)
 }

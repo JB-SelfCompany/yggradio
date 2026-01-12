@@ -159,7 +159,15 @@ export default function StreamingCredentialsModal({
   // Get actual server URL from current location and server info
   // Priority: 1. serverInfo.port (from config), 2. window.location.port (from browser URL), 3. default 8080
   const port = serverInfo?.port || parseInt(window.location.port) || 8080;
-  const serverUrl = `http://[${window.location.hostname}]:${port}`;
+
+  // For IPv6 addresses, window.location.hostname already includes brackets
+  // Check if hostname already has brackets to avoid double-wrapping
+  const hostname = window.location.hostname;
+  const hostnameWithBrackets = hostname.includes(':') && !hostname.startsWith('[')
+    ? `[${hostname}]`  // IPv6 without brackets - add them
+    : hostname;        // IPv4 or IPv6 with brackets already - use as-is
+
+  const serverUrl = `http://${hostnameWithBrackets}:${port}`;
 
   const ffmpegCommand = credentials
     ? `ffmpeg -re -i your-audio.flac \\
@@ -167,7 +175,7 @@ export default function StreamingCredentialsModal({
   -vn \\
   -f mp3 -content_type audio/mpeg \\
   -method PUT \\
-  'http://${credentials.username}:${credentials.password}@[${window.location.hostname}]:${port}${credentials.mountpoint}'`
+  'http://${credentials.username}:${credentials.password}@${hostnameWithBrackets}:${port}${credentials.mountpoint}'`
     : '';
 
   return (
@@ -212,8 +220,18 @@ export default function StreamingCredentialsModal({
           </div>
         )}
 
-        {/* Credentials */}
-        {!loading && !error && credentials && (
+        {/* External HLS Stream Notice */}
+        {station.external_stream_type === 'hls' && (
+          <div className="bg-blue-900 bg-opacity-50 border border-blue-700 rounded-lg p-4 text-blue-200 mb-4">
+            <p className="font-medium mb-2">External HLS Stream</p>
+            <p className="text-sm text-blue-300">
+              This station streams from an external HLS source. No source credentials are needed - the stream is automatically relayed to listeners.
+            </p>
+          </div>
+        )}
+
+        {/* Credentials - Only for non-HLS streams */}
+        {!loading && !error && credentials && station.external_stream_type !== 'hls' && (
           <div className="space-y-3 sm:space-y-4">
             {/* Username */}
             <div>

@@ -4,7 +4,7 @@
 
 **Decentralized Radio Platform on Yggdrasil Mesh Network**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/JB-SelfCompany/yggradio/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/JB-SelfCompany/yggradio/releases)
 [![Go Version](https://img.shields.io/badge/go-1.21+-00ADD8.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-GPLv3-green.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/JB-SelfCompany/yggradio/pulls)
@@ -72,17 +72,9 @@
 
 ### From Binary
 
-Download the latest release for your platform:
+**[Download from GitHub Releases](https://github.com/JB-SelfCompany/yggradio/releases/latest)**
 
-```bash
-# Linux/macOS
-wget https://github.com/JB-SelfCompany/yggradio/releases/download/v1.0.0/yggradio-linux-amd64.tar.gz
-tar -xzf yggradio-linux-amd64.tar.gz
-sudo mv yggradio /usr/local/bin/
-
-# Windows
-# Download from releases page and add to PATH
-```
+Choose the binary for your platform (Linux, macOS, or Windows), extract it, and add to your PATH.
 
 ### From Source
 
@@ -101,7 +93,9 @@ bash build.sh  # Linux/macOS
 
 For production deployments on Linux, use systemd to run YggRadio as a service:
 
-#### YggRadio Service
+#### YggRadio Service (Required)
+
+**This is the main application that you need to run.**
 
 ```bash
 # Create system user
@@ -136,7 +130,9 @@ sudo systemctl status yggradio
 sudo journalctl -u yggradio -f
 ```
 
-#### Federation Server Service
+#### Federation Server Service (Optional - Advanced Users Only)
+
+> **⚠️ Note:** This service is **optional** and only needed if you want to run your own federation discovery hub. Most users should **skip this section** and just run the main YggRadio service above. You can join an existing federation by configuring `federation.enabled: true` in your `config.yaml` without running a federation server.
 
 ```bash
 # Create system user
@@ -177,6 +173,8 @@ sudo journalctl -u yggradio-federation-server -f
 
 ## 🚀 Quick Start
 
+> **📝 Note:** This guide shows how to run the main YggRadio application. You do **not** need to run a federation server - YggRadio works perfectly in standalone mode!
+
 1. **Install and start Yggdrasil daemon:**
    ```bash
    # See: https://yggdrasil-network.github.io/installation.html
@@ -200,146 +198,50 @@ sudo journalctl -u yggradio-federation-server -f
 
 ## 🔐 Authentication
 
-YggRadio supports **two authentication methods** - choose the one that fits your needs:
+YggRadio supports **two authentication methods**:
 
 ### Ed25519 Key Pairs
 
 **Privacy-focused cryptographic authentication with no passwords**
 
-#### Browser-Generated Keys (Quick & Easy)
-
-1. Click **"Login"** → **"Generate New Keys"**
-2. **Save your keys securely** (download the JSON file)
-3. Keys are stored in `sessionStorage` (cleared when browser closes)
-
-#### Manually-Generated Keys (Most Secure)
-
-For maximum security, generate keys outside the browser:
-
-**Python (PyNaCl):**
-```bash
-python3 -c "import nacl.signing, base64; \
-key = nacl.signing.SigningKey.generate(); \
-print('Private:', base64.b64encode(bytes(key)).decode()); \
-print('Public:', base64.b64encode(bytes(key.verify_key)).decode())"
-```
-
-**Node.js (tweetnacl):**
-```bash
-node -e "const nacl = require('tweetnacl'); \
-const key = nacl.sign.keyPair(); \
-console.log('Private:', Buffer.from(key.secretKey).toString('base64')); \
-console.log('Public:', Buffer.from(key.publicKey).toString('base64'));"
-```
-
-**OpenSSL:**
-```bash
-openssl genpkey -algorithm ed25519 -out key.pem
-openssl pkey -in key.pem -pubout -out pubkey.pem
-# Note: Convert PEM to base64 manually
-```
-
-**Import Keys:**
-1. Click **"Login"** → **"Import Keys"**
-2. Paste your public and private keys (base64 format)
-3. Or upload the JSON file
+- Click **"Login"** → **"Generate New Keys"** or **"Import Keys"**
+- Keys are stored in browser's `sessionStorage` (cleared when browser closes)
+- For maximum security, generate keys outside the browser using PyNaCl, tweetnacl, or OpenSSL
 
 **Security:**
 - ✅ Private keys never leave your device
-- ✅ No passwords to remember or compromise
-- ✅ Cryptographic signatures for every request
-- ✅ Automatic replay protection (5-minute window)
-
----
+- ✅ No passwords required
+- ✅ Cryptographic signatures with automatic replay protection
 
 ### Magic Link
 
 **Simple bookmark-based authentication for easy access**
 
-#### Generate a Magic Link
-
-1. Click **"Login"** → **"Magic Link"**
-2. Click **"Generate Magic Link"**
-3. Wait for Proof-of-Work calculation (~2-4 seconds)
-4. **Save the link securely** (bookmark or download)
-
-#### Use Your Magic Link
-
-1. Visit the saved link in any browser
-2. A session cookie is created automatically (1 week expiration)
-3. Visit the link again anytime to refresh your session
+1. Click **"Login"** → **"Magic Link"** → **"Generate Magic Link"**
+2. Wait for Proof-of-Work calculation (~2-4 seconds)
+3. Save the link securely (bookmark or password manager)
+4. Visit the link anytime to authenticate
 
 **Security Notes:**
-- ⚠️ **Anyone with the link can access your account** - store it securely
-- 🔒 Magic link never expires, but cookies do (1 week)
-- 🔐 Tokens and cookies stored as SHA256 hashes (192-bit and 256-bit entropy)
-- 🛡️ Constant-time comparison prevents timing attacks
-- 📝 Recommended: Store in password manager or bookmark securely
-
-**When to Use:**
-- ✅ Quick access from multiple devices
-- ✅ Don't want to manage cryptographic keys
-- ✅ Prefer bookmark-style authentication
-- ❌ Highest security requirements (use Ed25519 instead)
+- ⚠️ Anyone with the link can access your account
+- 🔒 Link never expires, cookies expire after 1 week
+- ✅ Best for quick access from multiple devices
+- ❌ Use Ed25519 for highest security requirements
 
 ---
 
 ## ⚙️ Configuration
 
-Configuration file location: `~/.yggradio/config.yaml`
-
-On first run, YggRadio automatically creates a default configuration file. You can also create it manually:
-
-```bash
-# Copy example configuration
-cp config.example.yaml ~/.yggradio/config.yaml
-
-# Edit configuration
-nano ~/.yggradio/config.yaml
-```
+Configuration file: `~/.yggradio/config.yaml` (auto-created on first run)
 
 **Key settings:**
+- `server.port`: Web interface port (default: 8080)
+- `server.bind`: IPv6 address (auto-detected)
+- `streaming.max_listeners_per_station`: Listener limit (default: 100)
+- `security.magic_link_enabled`: Enable magic link auth (default: true)
+- `federation.enabled`: Join federation network (default: false)
 
-```yaml
-server:
-  port: 8080
-  bind: ""  # Auto-detect Yggdrasil IPv6 address
-  instance_name: "My YggRadio"
-
-streaming:
-  max_listeners_per_station: 100
-  max_source_clients: 10
-  buffer_size: 32768
-  server_secret: ""  # Auto-generated on first run
-
-security:
-  magic_link_enabled: true  # Enable magic link authentication
-  magic_link_token_length: 24  # 24 bytes = 48 hex chars (192 bits)
-  magic_link_cookie_ttl: 604800  # 1 week in seconds
-  magic_link_require_pow: true  # Require PoW for spam protection
-  magic_link_pow_difficulty: 16  # Same as station creation
-
-federation:
-  enabled: false  # Set to true to join federation
-  server_address: "301:be28:cf55:3c9::10"
-  server_port: 9000
-```
-
-**Full configuration example:** See [config.example.yaml](config.example.yaml)
-
-### Federation Server Configuration
-
-For running a federation server:
-
-```bash
-# Copy example configuration
-cp config-federation.example.yaml ~/.yggradio-federation/config.yaml
-
-# Edit configuration
-nano ~/.yggradio-federation/config.yaml
-```
-
-**Full federation configuration example:** See [config-federation.example.yaml](config-federation.example.yaml)
+**Full configuration examples:** [config.example.yaml](config.example.yaml), [config-federation.example.yaml](config-federation.example.yaml)
 
 ---
 
@@ -347,69 +249,34 @@ nano ~/.yggradio-federation/config.yaml
 
 ### Broadcasting
 
-Use any streaming source client that supports HTTP streaming:
+Use any HTTP streaming client (ffmpeg, OBS Studio, BUTT):
 
 **ffmpeg example:**
 ```bash
-ffmpeg -re -i music.mp3 -codec:a libmp3lame -b:a 128k \
-  -f mp3 http://[YOUR_YGGDRASIL_IP]:8080/your-mountpoint \
-  -user username -password your-source-password
+ffmpeg -re -i audio.flac -codec:a libmp3lame -b:a 128k \
+  -f mp3 -content_type audio/mpeg -method PUT \
+  'http://username:password@[YOUR_IP]:8080/mountpoint'
 ```
-
-**OBS Studio:**
-1. Settings → Stream
-2. Service: Custom
-3. Server: `http://[YOUR_YGGDRASIL_IP]:8080/your-mountpoint`
-4. Stream Key: Use HTTP Basic Auth
-
-**BUTT (Broadcast Using This Tool):**
-1. Settings → Server → Icecast
-2. Address: Your Yggdrasil IPv6
-3. Port: 8080
-4. Mountpoint: /your-mountpoint
 
 ### Listening
 
-Open the station URL in your web browser:
-```
-http://[BROADCASTER_YGGDRASIL_IP]:8080/
-```
-
-The web player will automatically load and stream audio.
+Open `http://[BROADCASTER_IP]:8080/` in your browser - the web player will automatically load.
 
 ---
 
 ## 🌐 Federation
 
-Federation allows YggRadio instances to discover each other through a central hub.
+**Optional** - YggRadio works perfectly standalone. Enable federation to discover stations from other nodes.
 
-### Joining a Federation
-
-1. Edit `~/.yggradio/config.yaml`:
-   ```yaml
-   federation:
-     enabled: true
-     server_address: "301:be28:cf55:3c9::10"  # Federation server address
-     server_port: 9000
-   ```
-
-2. Restart YggRadio:
-   ```bash
-   sudo systemctl restart yggradio
-   ```
-
-### Running a Federation Server
-
-```bash
-# Install federation server
-sudo cp yggradio-federation-server /usr/local/bin/
-
-# Start with systemd
-sudo cp systemd/yggradio-federation-server.service /etc/systemd/system/
-sudo systemctl enable --now yggradio-federation-server
+**To join a federation:** Edit `~/.yggradio/config.yaml`:
+```yaml
+federation:
+  enabled: true
+  server_address: "301:be28:cf55:3c9::10"
+  server_port: 9000
 ```
 
-Configuration: `~/.yggradio-federation/config.yaml`
+**To host your own federation server:** See systemd service files and `config-federation.example.yaml`
 
 ---
 
@@ -426,17 +293,17 @@ Each YggRadio instance works independently without requiring any external servic
                           │
     ┌─────────────────────┼─────────────────────┐
     │                     │                     │
-┌───▼────┐          ┌─────▼─────┐        ┌─────▼─────┐
-│ Client │          │ YggRadio  │        │ YggRadio  │
-│Browser │◄────────►│  Node 1   │        │  Node 2   │
+┌───▼────┐          ┌─────▼──────┐        ┌─────▼──────┐
+│ Client │          │  YggRadio  │        │  YggRadio  │
+│Browser │◄────────►│  Node 1    │        │  Node 2    │
 └────────┘          │(Standalone)│        │(Standalone)│
-                    └─────┬─────┘        └─────┬─────┘
-                          │                    │
-                          ▼                    ▼
-                     ┌─────────┐          ┌─────────┐
-                     │ SQLite  │          │ SQLite  │
-                     │   DB    │          │   DB    │
-                     └─────────┘          └─────────┘
+                    └─────┬──────┘        └─────┬──────┘
+                          │                     │
+                          ▼                     ▼
+                     ┌─────────┐           ┌─────────┐
+                     │ SQLite  │           │ SQLite  │
+                     │   DB    │           │   DB    │
+                     └─────────┘           └─────────┘
 ```
 
 ### Federation Mode (Optional)
@@ -450,17 +317,17 @@ Enable federation for automatic station discovery across the network:
                  │  - Node Heartbeats       │
                  └────────┬─────────────────┘
                           │
-         ┌────────────────┼────────────────┐
-         │                │                │
-    ┌────▼─────┐     ┌────▼─────┐    ┌────▼─────┐
-    │YggRadio 1│◄───►│YggRadio 2│◄───►│YggRadio 3│
-    │(Federated)│     │(Federated)│    │(Federated)│
-    └────┬─────┘     └────┬─────┘    └────┬─────┘
-         │                │                │
-    ┌────▼─────┐     ┌────▼─────┐    ┌────▼─────┐
-    │ SQLite   │     │ SQLite   │    │ SQLite   │
-    │   DB     │     │   DB     │    │   DB     │
-    └──────────┘     └──────────┘    └──────────┘
+         ┌────────────────┼──────────────────┐
+         │                │                  │
+    ┌────▼──────┐     ┌────▼──────┐     ┌────▼──────┐
+    │YggRadio 1 │◄───►│YggRadio 2 │◄───►│YggRadio 3 │
+    │(Federated)│     │(Federated)│     │(Federated)│
+    └────┬──────┘     └────┬──────┘     └────┬──────┘
+         │                 │                 │
+    ┌────▼─────┐      ┌────▼─────┐      ┌────▼─────┐
+    │ SQLite   │      │ SQLite   │      │ SQLite   │
+    │   DB     │      │   DB     │      │   DB     │
+    └──────────┘      └──────────┘      └──────────┘
 
     Node 1 ◄──────► Node 2 ◄──────► Node 3
     (Direct station streaming between nodes)
@@ -493,91 +360,21 @@ Enable federation for automatic station discovery across the network:
 
 ## 🛠️ Development
 
-### Project Structure
-
-```
-yggradio/
-├── cmd/
-│   ├── yggradio/                      # Main application
-│   └── yggradio-federation-server/    # Federation server
-├── internal/
-│   ├── api/
-│   │   ├── handlers/                  # HTTP request handlers
-│   │   └── middleware/                # Auth, rate limiting, CSRF
-│   ├── config/                        # Configuration management
-│   ├── database/
-│   │   ├── models/                    # Database repositories
-│   │   └── schema.sql                 # Database schema
-│   ├── federation_client/             # Federation client
-│   ├── federation_server/             # Federation server
-│   ├── moderation/                    # PoW & content filtering
-│   ├── security/                      # Auth, CSRF, validation, sanitization
-│   ├── streaming/                     # HTTP streaming server
-│   ├── testutil/                      # Testing utilities
-│   ├── utils/                         # Helper functions
-│   └── web/
-│       └── dist/                      # Embedded frontend (built)
-├── web/                               # React frontend source
-│   ├── src/
-│   │   ├── components/                # React components
-│   │   ├── lib/                       # API client, utilities
-│   │   ├── pages/                     # Page components
-│   │   └── stores/                    # Zustand state stores
-│   └── dist/                          # Frontend build output
-├── systemd/                           # Systemd service files
-├── bin/                               # Compiled binaries (gitignored)
-└── dist/                              # Release archives (gitignored)
-```
-
 ### Building
 
 ```bash
-# Full build (frontend + backend for all platforms)
-bash build.sh
-
-# Backend only
-go build -o bin/yggradio ./cmd/yggradio
-
-# Frontend only
-cd web && npm run build
-
-# Frontend dev server (with hot reload)
-cd web && npm run dev
-
-# Backend with auto-reload (requires air)
-air
+bash build.sh                          # Full build (all platforms)
+go build -o bin/yggradio ./cmd/yggradio  # Backend only
+cd web && npm run build                # Frontend only
+cd web && npm run dev                  # Dev server with hot reload
 ```
 
 ### Testing
 
 ```bash
-# All tests with race detector
-go test -v -race ./...
-
-# Unit tests only (fast)
-go test -v -race -short ./...
-
-# Security tests
-go test -v -race ./internal/security/...
-
-# Frontend tests
-cd web && npm test
-
-# Coverage report
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-```
-
-### Code Quality
-
-```bash
-# Format
-go fmt ./...
-
-# Lint
-go vet ./...
-cd web && npm run lint
-
+go test -v -race ./...                 # All tests
+go test -v -race -short ./...          # Unit tests only
+cd web && npm test                     # Frontend tests
 ```
 
 ---

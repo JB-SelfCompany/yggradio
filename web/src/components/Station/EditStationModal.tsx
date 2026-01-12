@@ -19,6 +19,9 @@ export default function EditStationModal({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [streamMode, setStreamMode] = useState<'direct' | 'external'>('direct');
+  const [externalStreamUrl, setExternalStreamUrl] = useState('');
+  const [externalStreamType, setExternalStreamType] = useState<'hls' | 'direct'>('hls');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { currentStreamUrl } = usePlayerStore();
@@ -29,6 +32,18 @@ export default function EditStationModal({
       setName(station.name);
       setDescription(station.description || '');
       setIsPrivate(station.is_private || false);
+
+      // Initialize external stream fields
+      if (station.external_stream_url) {
+        setStreamMode('external');
+        setExternalStreamUrl(station.external_stream_url);
+        setExternalStreamType(station.external_stream_type || 'hls');
+      } else {
+        setStreamMode('direct');
+        setExternalStreamUrl('');
+        setExternalStreamType('hls');
+      }
+
       setError('');
     }
   }, [isOpen, station]);
@@ -36,20 +51,54 @@ export default function EditStationModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // Validate external stream URL if in external mode
+    if (streamMode === 'external') {
+      const urlTrimmed = externalStreamUrl.trim();
+      if (!urlTrimmed) {
+        setError('External stream URL is required for external mode');
+        return;
+      }
+      // Basic URL validation
+      try {
+        const url = new URL(urlTrimmed);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+          setError('External stream URL must use HTTP or HTTPS protocol');
+          return;
+        }
+      } catch {
+        setError('Invalid external stream URL format');
+        return;
+      }
+    }
+
     setLoading(true);
 
     try {
       // Get CSRF token
       const csrfToken = await fetchCSRFToken();
 
+      // Prepare request body
+      const requestBody: any = {
+        name,
+        description,
+        is_private: isPrivate,
+      };
+
+      // Add external stream fields based on mode
+      if (streamMode === 'external') {
+        requestBody.external_stream_url = externalStreamUrl.trim();
+        requestBody.external_stream_type = externalStreamType;
+      } else {
+        // Clear external fields if switching to direct mode
+        requestBody.external_stream_url = null;
+        requestBody.external_stream_type = null;
+      }
+
       // Update station with authentication
       await api.put(
         `/stations/${station.id}`,
-        {
-          name,
-          description,
-          is_private: isPrivate,
-        },
+        requestBody,
         true, // requiresAuth
         csrfToken
       );
@@ -155,6 +204,82 @@ export default function EditStationModal({
               Mountpoint cannot be changed after creation
             </p>
           </div>
+
+          {/* Stream Source Mode */}
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Stream Source <span className="text-red-500">*</span>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setStreamMode('direct')}
+                className={`p-3 rounded border transition-all ${
+                  streamMode === 'direct'
+                    ? 'bg-indigo-600 border-indigo-500 text-white'
+                    : 'bg-gray-800 border-gray-700 hover:border-gray-600'
+                }`}
+                disabled={loading}
+              >
+                <div className="font-medium">Direct Streaming</div>
+                <div className="text-xs mt-1 opacity-80">OBS, ffmpeg, BUTT</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStreamMode('external')}
+                className={`p-3 rounded border transition-all ${
+                  streamMode === 'external'
+                    ? 'bg-indigo-600 border-indigo-500 text-white'
+                    : 'bg-gray-800 border-gray-700 hover:border-gray-600'
+                }`}
+                disabled={loading}
+              >
+                <div className="font-medium">External Source</div>
+                <div className="text-xs mt-1 opacity-80">HLS, Icecast URL</div>
+              </button>
+            </div>
+          </div>
+
+          {/* External Stream URL (only show if external mode) */}
+          {streamMode === 'external' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  External Stream URL <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="url"
+                  value={externalStreamUrl}
+                  onChange={(e) => setExternalStreamUrl(e.target.value)}
+                  placeholder="https://example.com/stream.m3u8"
+                  className="w-full p-2 bg-gray-800 border border-gray-700 rounded focus:border-indigo-500 focus:outline-none"
+                  required
+                  disabled={loading}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  URL of HLS playlist (.m3u8) or direct audio stream
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Stream Type <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={externalStreamType}
+                  onChange={(e) => setExternalStreamType(e.target.value as 'hls' | 'direct')}
+                  className="w-full p-2 bg-gray-800 border border-gray-700 rounded focus:border-indigo-500 focus:outline-none"
+                  disabled={loading}
+                >
+                  <option value="hls">HLS Playlist (.m3u8)</option>
+                  <option value="direct">Direct Audio Stream (MP3/AAC/Ogg)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Select the type of external stream
+                </p>
+              </div>
+            </>
+          )}
 
           {/* Privacy */}
           <div>

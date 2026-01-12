@@ -37,7 +37,7 @@ func DefaultConfig() *Config {
 			Enabled:          false, // Default: disabled (must configure server first)
 			ServerAddress:    "301:be28:cf55:3c9::10",
 			ServerPort:       9000,
-			RegisterInterval: 120,  // 2 minutes (avoid rate limits)
+			RegisterInterval: 450,  // 7.5 minutes (server allows 10 registrations/hour, 450s = 8/hour with safety margin)
 			QueryInterval:    60,   // 1 minute (station list updates)
 			Timeout:          30,   // 30 seconds
 		},

@@ -41,6 +41,11 @@ CREATE INDEX IF NOT EXISTS idx_stations_private ON stations(is_private);
 CREATE INDEX IF NOT EXISTS idx_stations_playlist_enabled ON stations(playlist_enabled);
 CREATE INDEX IF NOT EXISTS idx_stations_federation_source ON stations(federation_source);
 
+-- Note: Additional indexes created via migrations:
+-- - idx_stations_listeners (for sorting by listeners) - Migration 001
+-- - idx_stations_external_url (for external stream URLs) - Migration 001
+-- - external_stream_url, external_stream_type columns - Migration 001
+
 -- Users (anonymous, privacy-first)
 -- pubkey is NULLABLE for magic link users who authenticate via session cookies
 CREATE TABLE IF NOT EXISTS users (

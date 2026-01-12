@@ -25,6 +25,7 @@ import (
 type Router struct {
 	db                  *database.DB
 	config              *config.Config
+	version             string
 	logger              *log.Logger
 	rateLimiter         *middleware.RateLimiter
 	authMw              *middleware.AuthMiddleware
@@ -43,7 +44,7 @@ type Router struct {
 
 // NewRouter creates a new HTTP router
 // streamingServer can be nil if streaming functionality is not needed yet
-func NewRouter(db *database.DB, cfg *config.Config, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey, yggAddr string, instanceURL string, logger *log.Logger, streamingServer handlers.StreamingServer) *Router {
+func NewRouter(db *database.DB, cfg *config.Config, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey, yggAddr string, instanceURL string, version string, logger *log.Logger, streamingServer handlers.StreamingServer) *Router {
 	rateLimiter := middleware.NewRateLimiter(
 		cfg.RateLimit.APIRequestsPerMinute,
 		cfg.RateLimit.AuthAttemptsPerMinute,
@@ -264,6 +265,7 @@ func NewRouter(db *database.DB, cfg *config.Config, publicKey ed25519.PublicKey,
 	return &Router{
 		db:                 db,
 		config:             cfg,
+		version:            version,
 		logger:             logger,
 		rateLimiter:        rateLimiter,
 		authMw:             authMw,
@@ -437,6 +439,9 @@ func (rt *Router) Setup() http.Handler {
 	// CORS
 	handler = middleware.CORS([]string{"*"})(handler)
 
+	// Gzip compression
+	handler = middleware.Gzip(handler)
+
 	// Rate limiting
 	handler = rt.rateLimiter.LimitAPI(handler)
 
@@ -478,7 +483,7 @@ func (rt *Router) handleInfo(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"name":        rt.config.Server.InstanceName,
 		"description": rt.config.Server.InstanceDescription,
-		"version":     "0.1.0",
+		"version":     rt.version,
 		"port":        rt.config.Server.Port,
 		"features": map[string]bool{
 			"streaming":  true,
@@ -535,6 +540,14 @@ func (rt *Router) handleStationDetail(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(r.URL.Path, "/stop") {
 		rt.authMw.AuthenticateAny(
 			rt.csrfMw.Protect(http.HandlerFunc(rt.stationHandler.StopBroadcast)),
+		).ServeHTTP(w, r)
+		return
+	}
+
+	// Check if this is a start broadcast request (POST/PUT - needs CSRF) - v1.1.0+
+	if strings.HasSuffix(r.URL.Path, "/start") {
+		rt.authMw.AuthenticateAny(
+			rt.csrfMw.Protect(http.HandlerFunc(rt.stationHandler.StartBroadcast)),
 		).ServeHTTP(w, r)
 		return
 	}
