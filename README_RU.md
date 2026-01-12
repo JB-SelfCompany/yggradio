@@ -252,10 +252,31 @@ YggRadio поддерживает **два метода аутентификац
 
 **Пример с ffmpeg:**
 ```bash
-ffmpeg -re -i audio.flac -codec:a libmp3lame -b:a 128k \
-  -f mp3 -content_type audio/mpeg -method PUT \
-  'http://username:password@[ВАШ_IP]:8080/mountpoint'
+ffmpeg -re -i your-audio.flac \
+  -codec:a libmp3lame -b:a 128k \
+  -vn \
+  -f mp3 -content_type audio/mpeg \
+  -method PUT \
+  'http://username:password@[ВАШ_YGGDRASIL_IP]:8080/your-mountpoint'
 ```
+
+Замените:
+- `your-audio.flac` - ваш аудиофайл
+- `username:password` - учетные данные из Stream Key
+- `[ВАШ_YGGDRASIL_IP]` - ваш IPv6 адрес Yggdrasil
+- `/your-mountpoint` - точка монтирования вашей станции
+
+**OBS Studio:**
+1. Настройки → Вещание
+2. Сервис: Пользовательский
+3. Сервер: `http://[ВАШ_YGGDRASIL_IP]:8080/your-mountpoint`
+4. Ключ потока: Используйте HTTP Basic Auth
+
+**BUTT (Broadcast Using This Tool):**
+1. Настройки → Сервер → Icecast
+2. Адрес: Ваш IPv6 адрес Yggdrasil
+3. Порт: 8080
+4. Точка монтирования: /your-mountpoint
 
 ### Прослушивание
 
@@ -267,12 +288,34 @@ ffmpeg -re -i audio.flac -codec:a libmp3lame -b:a 128k \
 
 **Опционально** - YggRadio отлично работает автономно. Включайте федерацию только для обнаружения станций от других узлов.
 
-**Присоединение к федерации:** Отредактируйте `~/.yggradio/config.yaml`:
-```yaml
-federation:
-  enabled: true
-  server_address: "301:be28:cf55:3c9::10"
-  server_port: 9000
+> **💡 Важно:** Федерация **полностью опциональна**. YggRadio отлично работает в автономном режиме. Включать федерацию нужно только если вы хотите обнаруживать станции от других узлов в сети. Запуск собственного сервера федерации необходим только если вы хотите хостить хаб обнаружения - большинство пользователей могут просто присоединиться к существующей федерации.
+
+### Присоединение к федерации
+
+1. Отредактируйте `~/.yggradio/config.yaml`:
+   ```yaml
+   federation:
+     enabled: true
+     server_address: "301:be28:cf55:3c9::10"  # Адрес сервера федерации
+     server_port: 9000
+   ```
+
+2. Перезапустите YggRadio:
+   ```bash
+   sudo systemctl restart yggradio
+   ```
+
+### Запуск сервера федерации (Опционально - Для продвинутых)
+
+> **⚠️ Примечание:** Это нужно только если вы хотите **хостить собственный** хаб обнаружения федерации. Большинству пользователей следует пропустить это и либо использовать автономный режим, либо присоединиться к существующей федерации.
+
+```bash
+# Установите сервер федерации
+sudo cp yggradio-federation-server /usr/local/bin/
+
+# Запустите через systemd
+sudo cp systemd/yggradio-federation-server.service /etc/systemd/system/
+sudo systemctl enable --now yggradio-federation-server
 ```
 
 **Запуск собственного сервера федерации:** См. файлы сервисов systemd и `config-federation.example.yaml`
