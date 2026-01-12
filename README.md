@@ -76,12 +76,9 @@ Download the latest release for your platform:
 
 ```bash
 # Linux/macOS
-wget https://github.com/JB-SelfCompany/yggradio/releases/download/v1.0.0/yggradio-linux-amd64.tar.gz
-tar -xzf yggradio-linux-amd64.tar.gz
-sudo mv yggradio /usr/local/bin/
-
-# Windows
-# Download from releases page and add to PATH
+wget https://github.com/JB-SelfCompany/yggradio/releases/download/1.0.0/yggradio-linux-amd64
+sudo mv yggradio-linux-amd64 /usr/local/bin/yggradio-linux
+cd /usr/local/bin/ && ./yggradio-linux
 ```
 
 ### From Source

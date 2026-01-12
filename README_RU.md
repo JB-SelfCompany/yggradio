@@ -75,12 +75,9 @@
 
 ```bash
 # Linux/macOS
-wget https://github.com/JB-SelfCompany/yggradio/releases/download/v1.0.0/yggradio-linux-amd64.tar.gz
-tar -xzf yggradio-linux-amd64.tar.gz
-sudo mv yggradio /usr/local/bin/
-
-# Windows
-# Скачайте со страницы релизов и добавьте в PATH
+wget https://github.com/JB-SelfCompany/yggradio/releases/download/1.0.0/yggradio-linux-amd64
+sudo mv yggradio-linux-amd64 /usr/local/bin/yggradio-linux
+cd /usr/local/bin/ && ./yggradio-linux
 ```
 
 ### Из исходного кода
