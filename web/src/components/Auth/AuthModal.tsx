@@ -17,6 +17,8 @@ export default function AuthModal({ onClose }: AuthModalProps) {
   // Magic link state
   const [magicLink, setMagicLink] = useState<string | null>(null);
   const [isGeneratingMagicLink, setIsGeneratingMagicLink] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+  const [copyError, setCopyError] = useState(false);
 
   const { generateKeyPair, importKeyPair, publicKey, privateKey } = useAuthStore();
   const { currentStreamUrl } = usePlayerStore();
@@ -131,11 +133,15 @@ export default function AuthModal({ onClose }: AuthModalProps) {
   const handleCopyLink = async () => {
     if (!magicLink) return;
 
+    setCopyError(false);
+    setCopySuccess(false);
+
     try {
       // Try modern clipboard API first
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(magicLink);
-        alert('Magic link copied to clipboard!');
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 3000);
       } else {
         // Fallback for older browsers or non-HTTPS contexts
         const textArea = document.createElement('textarea');
@@ -149,17 +155,20 @@ export default function AuthModal({ onClose }: AuthModalProps) {
 
         try {
           document.execCommand('copy');
-          alert('Magic link copied to clipboard!');
+          setCopySuccess(true);
+          setTimeout(() => setCopySuccess(false), 3000);
         } catch (err) {
           console.error('Fallback copy failed:', err);
-          alert('Failed to copy. Please copy manually.');
+          setCopyError(true);
+          setTimeout(() => setCopyError(false), 3000);
         }
 
         document.body.removeChild(textArea);
       }
     } catch (err) {
       console.error('Failed to copy magic link:', err);
-      alert('Failed to copy. Please copy manually.');
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 3000);
     }
   };
 
@@ -537,6 +546,20 @@ openssl pkey -in key.pem -pubout -out pubkey.pem`}
                       Download
                     </button>
                   </div>
+
+                  {/* Copy Success Message */}
+                  {copySuccess && (
+                    <div className="p-3 bg-green-900 bg-opacity-50 border border-green-700 rounded text-green-200 text-sm">
+                      Magic link copied to clipboard!
+                    </div>
+                  )}
+
+                  {/* Copy Error Message */}
+                  {copyError && (
+                    <div className="p-3 bg-red-900 bg-opacity-50 border border-red-700 rounded text-red-200 text-sm">
+                      Failed to copy. Please copy manually.
+                    </div>
+                  )}
 
                   <button
                     onClick={onClose}

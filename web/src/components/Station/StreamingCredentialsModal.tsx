@@ -19,6 +19,8 @@ export default function StreamingCredentialsModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
   const { currentStreamUrl } = usePlayerStore();
 
   // Playlist configuration state
@@ -60,6 +62,7 @@ export default function StreamingCredentialsModal({
   };
 
   const copyToClipboard = async (text: string, field: string) => {
+    setCopyError(false);
     try {
       // Try modern clipboard API first
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -83,14 +86,16 @@ export default function StreamingCredentialsModal({
           setTimeout(() => setCopiedField(null), 2000);
         } catch (err) {
           console.error('Fallback copy failed:', err);
-          alert('Failed to copy to clipboard. Please copy manually.');
+          setCopyError(true);
+          setTimeout(() => setCopyError(false), 3000);
         } finally {
           document.body.removeChild(textArea);
         }
       }
     } catch (err) {
       console.error('Failed to copy:', err);
-      alert('Failed to copy to clipboard. Please copy manually.');
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 3000);
     }
   };
 
@@ -114,7 +119,8 @@ export default function StreamingCredentialsModal({
 
       // Update the station object in parent component if needed
       // For now, just show success
-      alert('Playlist configuration saved successfully!');
+      setSuccessMessage('Playlist configuration saved successfully!');
+      setTimeout(() => setSuccessMessage(''), 5000);
     } catch (err: any) {
       setError(err.message || 'Failed to save playlist configuration');
     } finally {
@@ -217,6 +223,20 @@ export default function StreamingCredentialsModal({
         {error && (
           <div className="bg-red-900 bg-opacity-50 border border-red-700 rounded-lg p-4 text-red-200 mb-4">
             {error}
+          </div>
+        )}
+
+        {/* Success Message */}
+        {successMessage && (
+          <div className="bg-green-900 bg-opacity-50 border border-green-700 rounded-lg p-4 text-green-200 mb-4">
+            {successMessage}
+          </div>
+        )}
+
+        {/* Copy Error */}
+        {copyError && (
+          <div className="bg-orange-900 bg-opacity-50 border border-orange-700 rounded-lg p-4 text-orange-200 mb-4">
+            Failed to copy to clipboard. Please copy manually.
           </div>
         )}
 

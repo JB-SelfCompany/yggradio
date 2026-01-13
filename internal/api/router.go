@@ -383,6 +383,21 @@ func (rt *Router) Setup() http.Handler {
 			return
 		}
 
+		// Station URL proxy: /stations/:mountpoint -> /:mountpoint
+		// This provides user-friendly URLs that proxy to the actual stream mountpoint
+		// Works with media players like VLC that don't follow redirects properly
+		if strings.HasPrefix(path, "/stations/") && r.Method == http.MethodGet {
+			mountpoint := strings.TrimPrefix(path, "/stations")
+			// Only proxy if mountpoint is not empty (not just "/" or "")
+			if mountpoint != "" && mountpoint != "/" && rt.streamingServer != nil {
+				// Rewrite the request path to the actual mountpoint
+				r.URL.Path = mountpoint
+				// Forward to streaming server
+				rt.streamingServer.ServeHTTP(w, r)
+				return
+			}
+		}
+
 		// Frontend routes: /, /assets/*, frontend files, known SPA routes
 		// Note: We explicitly check for common frontend extensions to avoid catching audio streams
 		isFrontendFile := strings.HasSuffix(path, ".js") ||

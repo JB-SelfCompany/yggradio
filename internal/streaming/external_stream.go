@@ -204,8 +204,6 @@ func (m *ExternalStreamManager) StartHLSStream(ctx context.Context, playlistURL,
 					continue
 				}
 
-				m.logger.Printf("[HLS] Downloaded segment %d (%s) - %d bytes", segment.Sequence, segmentFilename, len(data))
-
 				// Detect content type from first segment if not yet detected
 				// Don't override if already detected from init segment (fMP4)
 				if detectedContentType == "" {
@@ -250,11 +248,6 @@ func (m *ExternalStreamManager) StartHLSStream(ctx context.Context, playlistURL,
 						}
 					}
 				}
-			}
-
-			// Log only if new segments were processed
-			if newSegmentCount > 0 {
-				m.logger.Printf("[HLS] Processed %d new segments", newSegmentCount)
 			}
 
 			// If VOD (not live), exit after all segments

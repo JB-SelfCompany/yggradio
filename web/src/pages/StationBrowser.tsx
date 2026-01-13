@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
-import { Radio, Users, Play, Search, Plus, Key, Edit, Trash2, StopCircle, ArrowUpDown } from 'lucide-react';
+import { Radio, Users, Play, Search, Plus, Key, Edit, Trash2, StopCircle, ArrowUpDown, Copy, Check } from 'lucide-react';
 import { api, base64ToHex, fetchCSRFToken } from '../lib/api';
 import { usePlayerStore, Station } from '../stores/playerStore';
 import { useAuthStore } from '../stores/authStore';
@@ -18,6 +18,9 @@ export default function StationBrowser() {
   const [credentialsStation, setCredentialsStation] = useState<Station | null>(null);
   const [editStation, setEditStation] = useState<Station | null>(null);
   const [deleteConfirmStation, setDeleteConfirmStation] = useState<Station | null>(null);
+  const [stopConfirmStation, setStopConfirmStation] = useState<Station | null>(null);
+  const [copiedStationId, setCopiedStationId] = useState<number | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { playStation, currentStation, isPlaying, stop } = usePlayerStore();
   const { isAuthenticated, publicKey } = useAuthStore();
 
@@ -52,7 +55,8 @@ export default function StationBrowser() {
 
   const handlePlayStation = (station: Station) => {
     if (station.status === 'offline') {
-      alert('This station is currently offline');
+      setErrorMessage('This station is currently offline');
+      setTimeout(() => setErrorMessage(null), 3000);
       return;
     }
     playStation(station);
@@ -73,17 +77,21 @@ export default function StationBrowser() {
   };
 
   const handleStopBroadcast = async (station: Station) => {
-    if (!confirm(`Stop broadcasting "${station.name}"? This will disconnect all listeners.`)) {
+    if (!stopConfirmStation) {
+      setStopConfirmStation(station);
       return;
     }
 
     try {
       const csrfToken = await fetchCSRFToken();
       await api.post(`/stations/${station.id}/stop`, {}, true, csrfToken);
+      setStopConfirmStation(null);
       // Small delay to ensure status is updated in DB before refetching
       setTimeout(() => refetch(), 500);
     } catch (err: any) {
-      alert(err.message || 'Failed to stop broadcast');
+      setErrorMessage(err.message || 'Failed to stop broadcast');
+      setTimeout(() => setErrorMessage(null), 5000);
+      setStopConfirmStation(null);
     }
   };
 
@@ -94,7 +102,8 @@ export default function StationBrowser() {
       // Small delay to ensure status is updated in DB before refetching
       setTimeout(() => refetch(), 500);
     } catch (err: any) {
-      alert(err.message || 'Failed to start broadcast');
+      setErrorMessage(err.message || 'Failed to start broadcast');
+      setTimeout(() => setErrorMessage(null), 5000);
     }
   };
 
@@ -110,7 +119,41 @@ export default function StationBrowser() {
       setDeleteConfirmStation(null);
       refetch();
     } catch (err: any) {
-      alert(err.message || 'Failed to delete station');
+      setErrorMessage(err.message || 'Failed to delete station');
+      setTimeout(() => setErrorMessage(null), 5000);
+      setDeleteConfirmStation(null);
+    }
+  };
+
+  const handleCopyStationUrl = async (station: Station) => {
+    const stationUrl = `${window.location.origin}/stations${station.mountpoint}`;
+
+    // Check if clipboard API is available
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(stationUrl);
+        setCopiedStationId(station.id);
+        setTimeout(() => setCopiedStationId(null), 2000);
+      } catch (err) {
+        // Fallback: do nothing, user can copy manually
+        console.error('Failed to copy to clipboard:', err);
+      }
+    } else {
+      // Fallback for non-secure contexts: create temporary input
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = stationUrl;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        setCopiedStationId(station.id);
+        setTimeout(() => setCopiedStationId(null), 2000);
+      } catch (err) {
+        console.error('Failed to copy to clipboard:', err);
+      }
     }
   };
 
@@ -137,6 +180,13 @@ export default function StationBrowser() {
           Browse and listen to live radio streams in the Yggdrasil network
         </p>
       </div>
+
+      {/* Error Message */}
+      {errorMessage && (
+        <div className="mb-6 bg-red-900 bg-opacity-50 border border-red-700 rounded-lg p-4 text-red-200">
+          {errorMessage}
+        </div>
+      )}
 
       {/* Search */}
       <div className="mb-6">
@@ -301,6 +351,27 @@ export default function StationBrowser() {
               </div>
             </div>
 
+            {/* Station URL */}
+            <div className="mt-3 p-2 bg-gray-800 rounded">
+              <div className="text-xs text-gray-500 mb-1">Station URL:</div>
+              <div className="flex items-center gap-1">
+                <code className="flex-1 text-xs text-gray-300 break-all">
+                  {window.location.origin}/stations{station.mountpoint}
+                </code>
+                <button
+                  onClick={() => handleCopyStationUrl(station)}
+                  className="p-1 hover:bg-gray-700 rounded transition-colors flex-shrink-0"
+                  title="Copy URL"
+                >
+                  {copiedStationId === station.id ? (
+                    <Check className="w-4 h-4 text-green-500" />
+                  ) : (
+                    <Copy className="w-4 h-4 text-gray-400" />
+                  )}
+                </button>
+              </div>
+            </div>
+
             {/* Actions */}
             <div className="mt-4 pt-4 border-t border-gray-800 space-y-2">
               {/* Owner-only actions */}
@@ -360,6 +431,32 @@ export default function StationBrowser() {
           </div>
         ))}
       </div>
+
+      {/* Stop Broadcast Confirmation Modal */}
+      {stopConfirmStation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 rounded-lg p-6 max-w-md w-full border border-gray-800">
+            <h2 className="text-xl font-bold mb-4">Stop Broadcast</h2>
+            <p className="text-gray-400 mb-6">
+              Stop broadcasting "{stopConfirmStation.name}"? This will disconnect all listeners.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setStopConfirmStation(null)}
+                className="flex-1 py-2 px-4 bg-gray-800 hover:bg-gray-700 rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleStopBroadcast(stopConfirmStation)}
+                className="flex-1 py-2 px-4 bg-orange-600 hover:bg-orange-700 rounded transition-colors"
+              >
+                Stop
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       {deleteConfirmStation && (

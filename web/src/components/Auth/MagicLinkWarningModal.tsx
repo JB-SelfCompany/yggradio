@@ -8,9 +8,11 @@ interface MagicLinkWarningModalProps {
 
 export default function MagicLinkWarningModal({ magicLink, onDismiss }: MagicLinkWarningModalProps) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
 
   // Copy magic link to clipboard
   const handleCopy = async () => {
+    setCopyError(false);
     try {
       // Try modern clipboard API first
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -34,14 +36,16 @@ export default function MagicLinkWarningModal({ magicLink, onDismiss }: MagicLin
           setTimeout(() => setCopied(false), 2000);
         } catch (err) {
           console.error('Fallback copy failed:', err);
-          alert('Failed to copy. Please copy manually.');
+          setCopyError(true);
+          setTimeout(() => setCopyError(false), 3000);
         }
 
         document.body.removeChild(textArea);
       }
     } catch (err) {
       console.error('Failed to copy magic link:', err);
-      alert('Failed to copy. Please copy manually.');
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 3000);
     }
   };
   return (
@@ -100,6 +104,11 @@ export default function MagicLinkWarningModal({ magicLink, onDismiss }: MagicLin
               )}
             </button>
           </div>
+          {copyError && (
+            <p className="text-xs text-red-400 mt-2">
+              Failed to copy. Please select and copy the link manually.
+            </p>
+          )}
         </div>
 
         {/* Warning box */}

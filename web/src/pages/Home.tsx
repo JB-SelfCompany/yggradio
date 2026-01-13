@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom';
 import { Radio, Shield } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/authStore';
 
 export default function Home() {
   const loginWithMagicLink = useAuthStore((state) => state.loginWithMagicLink);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     // Check for ?first_login=true query parameter
@@ -18,7 +19,8 @@ export default function Home() {
         .catch((err) => {
           console.error('Failed to verify magic link session:', err);
           // Show error to user
-          alert('Authentication failed. Please try using your magic link again.');
+          setErrorMessage('Authentication failed. Please try using your magic link again.');
+          setTimeout(() => setErrorMessage(null), 5000);
         });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -27,6 +29,12 @@ export default function Home() {
   return (
     <>
     <div className="container mx-auto px-4 py-12">
+      {/* Error Message */}
+      {errorMessage && (
+        <div className="mb-8 bg-red-900 bg-opacity-50 border border-red-700 rounded-lg p-4 text-red-200">
+          {errorMessage}
+        </div>
+      )}
       {/* Hero Section */}
       <div className="text-center mb-16">
         <h1 className="text-5xl font-bold mb-4">

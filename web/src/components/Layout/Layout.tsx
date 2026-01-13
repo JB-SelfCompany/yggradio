@@ -136,8 +136,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Footer */}
       <footer className="bg-gray-900 border-t border-gray-800 py-4">
         <div className="container mx-auto px-4">
-          <div className="flex items-center justify-center sm:justify-between gap-4 text-sm text-gray-400">
-            <div className="flex items-center gap-2 order-2 sm:order-1">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 text-sm text-gray-400">
+            <div className="flex items-center gap-2">
               <span>© 2026 JB-SelfCompany</span>
               {version && (
                 <>
@@ -150,7 +150,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               href="https://github.com/JB-SelfCompany/yggradio"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 hover:text-indigo-400 transition-colors order-1 sm:order-2 absolute sm:relative right-4 sm:right-auto"
+              className="flex items-center gap-2 hover:text-indigo-400 transition-colors"
             >
               <Github className="w-4 h-4" />
               <span>GitHub</span>
