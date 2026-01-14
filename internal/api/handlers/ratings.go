@@ -477,8 +477,14 @@ func (h *RatingHandler) SubmitFederatedRating(w http.ResponseWriter, r *http.Req
 
 	nodeAddress := federatedStation.SourceNodeAddress.String
 
+	// Get source node port (use local server port as fallback)
+	nodePort := h.serverPort
+	if federatedStation.SourceNodePort.Valid && federatedStation.SourceNodePort.Int64 > 0 {
+		nodePort = int(federatedStation.SourceNodePort.Int64)
+	}
+
 	// Forward rating to source node
-	if err := h.forwardRatingToSourceNode(nodeAddress, stationUUID, userPubkey, req.Rating); err != nil {
+	if err := h.forwardRatingToSourceNode(nodeAddress, nodePort, stationUUID, userPubkey, req.Rating); err != nil {
 		h.logger.Printf("ERROR: Failed to forward rating to source node %s: %v", nodeAddress, err)
 		http.Error(w, "Failed to submit rating to source node", http.StatusBadGateway)
 		return
@@ -497,9 +503,9 @@ func (h *RatingHandler) SubmitFederatedRating(w http.ResponseWriter, r *http.Req
 }
 
 // forwardRatingToSourceNode sends rating to the source node via HTTP
-func (h *RatingHandler) forwardRatingToSourceNode(nodeAddress, stationUUID, voterPubkey string, rating int) error {
+func (h *RatingHandler) forwardRatingToSourceNode(nodeAddress string, nodePort int, stationUUID, voterPubkey string, rating int) error {
 	// Build request URL
-	url := fmt.Sprintf("http://[%s]:%d/api/federation/ratings", nodeAddress, h.serverPort)
+	url := fmt.Sprintf("http://[%s]:%d/api/federation/ratings", nodeAddress, nodePort)
 
 	// Create timestamp for signature
 	timestamp := time.Now().Unix()
