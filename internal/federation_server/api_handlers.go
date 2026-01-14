@@ -120,15 +120,18 @@ func (h *APIHandlers) HandleStations(w http.ResponseWriter, r *http.Request) {
 	for _, station := range stations {
 		nodeName := ""
 		nodeAddress := ""
+		nodePort := 8080 // Default port
 		if node, ok := nodeMap[station.NodeUUID]; ok {
 			nodeName = node.Name
 			nodeAddress = node.Address
+			nodePort = node.Port
 		}
 
 		publicStation := StationPublic{
 			UUID:           station.UUID,
 			NodeUUID:       station.NodeUUID,
 			NodeAddress:    nodeAddress,
+			NodePort:       nodePort,
 			NodeName:       nodeName,
 			Name:           station.Name,
 			Description:    station.Description.String,

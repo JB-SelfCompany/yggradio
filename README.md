@@ -2,22 +2,30 @@
 
 # 📻 YggRadio
 
-**Decentralized Radio Platform on Yggdrasil Mesh Network**
+### Decentralized Radio Platform on Yggdrasil Mesh Network
 
 [![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/JB-SelfCompany/yggradio/releases)
 [![Go Version](https://img.shields.io/badge/go-1.21+-00ADD8.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-GPLv3-green.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/JB-SelfCompany/yggradio/pulls)
 
-*Self-hosted, privacy-first radio streaming over the Yggdrasil encrypted mesh network*
+**Self-hosted, privacy-first radio streaming over the Yggdrasil encrypted mesh network**
+
+**Languages:** 🇬🇧 English | [🇷🇺 Русский](README.ru.md)
 
 [Features](#-features) •
 [Installation](#-installation) •
 [Quick Start](#-quick-start)
 
-[🇷🇺 Русская версия](README_RU.md)
-
 </div>
+
+---
+
+## Overview
+
+YggRadio is a decentralized radio streaming platform built on top of the Yggdrasil Network. It provides a self-hosted, privacy-first solution for broadcasting and listening to radio streams over an encrypted mesh network. With no central servers required, YggRadio enables truly peer-to-peer radio broadcasting with end-to-end encryption provided by Yggdrasil's TLS 1.3 transport layer.
+
+The platform supports multiple audio formats, offers dual authentication methods (Ed25519 cryptographic signatures or magic links), and includes an optional federation system for discovering stations across the network. All traffic is automatically encrypted, and the system requires no personal information from users.
 
 ---
 

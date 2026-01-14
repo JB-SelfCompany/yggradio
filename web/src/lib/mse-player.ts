@@ -14,7 +14,9 @@ export class MSEAudioPlayer {
   private fetchController: AbortController;
   private mimeType: string;
   private isPlaying: boolean = false;
-  private minBufferSeconds: number = 1.0; // Start playing after 1 second buffered
+  private minBufferSeconds: number = 2.0; // Start playing after 2 seconds buffered (increased for Yggdrasil latency)
+  private bufferCleanupInterval: number | null = null;
+  private maxBufferSeconds: number = 30; // Keep 30 seconds in buffer for high-latency networks
 
   constructor(audioElement: HTMLAudioElement, mimeType: string = 'audio/mpeg') {
     this.audio = audioElement;
@@ -56,10 +58,46 @@ export class MSEAudioPlayer {
 
       console.log('MSE: SourceBuffer created successfully');
 
+      // Start periodic buffer cleanup to prevent memory leaks
+      this.startBufferCleanup();
+
       this.startFetching();
     } catch (error) {
       console.error('MSE: Error creating SourceBuffer:', error);
       this.fallbackToDirectPlay();
+    }
+  }
+
+  private startBufferCleanup() {
+    // Clean up old buffer data every 15 seconds (less aggressive for high-latency networks)
+    this.bufferCleanupInterval = window.setInterval(() => {
+      this.cleanupOldBuffer();
+    }, 15000);
+  }
+
+  private cleanupOldBuffer() {
+    if (!this.sourceBuffer || this.sourceBuffer.updating) {
+      return;
+    }
+
+    try {
+      if (this.sourceBuffer.buffered.length === 0) {
+        return;
+      }
+
+      const currentTime = this.audio.currentTime;
+      const bufferedStart = this.sourceBuffer.buffered.start(0);
+      const bufferedEnd = this.sourceBuffer.buffered.end(this.sourceBuffer.buffered.length - 1);
+
+      // Remove old data that's more than maxBufferSeconds behind current playback
+      const removeEnd = Math.max(bufferedStart, currentTime - this.maxBufferSeconds);
+
+      if (removeEnd > bufferedStart && removeEnd < bufferedEnd) {
+        console.log(`MSE: Cleaning buffer from ${bufferedStart.toFixed(2)}s to ${removeEnd.toFixed(2)}s (current: ${currentTime.toFixed(2)}s)`);
+        this.sourceBuffer.remove(bufferedStart, removeEnd);
+      }
+    } catch (error) {
+      console.warn('MSE: Error cleaning buffer:', error);
     }
   }
 
@@ -90,8 +128,10 @@ export class MSEAudioPlayer {
 
       const reader = response.body.getReader();
 
-      // For Yggdrasil: accumulate 8KB chunks before appending to SourceBuffer
-      const chunkSize = 8192;
+      // For Yggdrasil: accumulate larger chunks before appending to SourceBuffer
+      // Increased for better handling of high-latency networks
+      const chunkSize = 16384; // 16KB chunks
+      const maxBufferSize = chunkSize * 8; // Max 128KB in temp buffer
       let buffer: Uint8Array<ArrayBuffer> = new Uint8Array(new ArrayBuffer(0));
       let totalReceived = 0;
 
@@ -101,6 +141,25 @@ export class MSEAudioPlayer {
         if (done) {
           console.log('MSE: Stream ended, total received:', totalReceived);
           break;
+        }
+
+        // CRITICAL: Prevent memory leak - don't accumulate more than maxBufferSize
+        if (buffer.length >= maxBufferSize) {
+          // Wait for SourceBuffer to be ready
+          while (this.sourceBuffer && this.sourceBuffer.updating) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+
+          if (!this.sourceBuffer) break;
+
+          // Force flush accumulated buffer
+          try {
+            this.sourceBuffer.appendBuffer(buffer);
+            buffer = new Uint8Array(new ArrayBuffer(0)); // Clear buffer
+          } catch (error) {
+            console.error('MSE: Error flushing buffer:', error);
+            break;
+          }
         }
 
         // Accumulate data - create a copy to avoid SharedArrayBuffer type issues
@@ -189,6 +248,12 @@ export class MSEAudioPlayer {
   public destroy() {
     console.log('MSE: Destroying player');
     this.fetchController.abort();
+
+    // Stop buffer cleanup
+    if (this.bufferCleanupInterval !== null) {
+      clearInterval(this.bufferCleanupInterval);
+      this.bufferCleanupInterval = null;
+    }
 
     if (this.sourceBuffer && this.mediaSource.readyState === 'open') {
       try {

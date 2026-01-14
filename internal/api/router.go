@@ -389,12 +389,26 @@ func (rt *Router) Setup() http.Handler {
 		if strings.HasPrefix(path, "/stations/") && r.Method == http.MethodGet {
 			mountpoint := strings.TrimPrefix(path, "/stations")
 			// Only proxy if mountpoint is not empty (not just "/" or "")
-			if mountpoint != "" && mountpoint != "/" && rt.streamingServer != nil {
-				// Rewrite the request path to the actual mountpoint
-				r.URL.Path = mountpoint
-				// Forward to streaming server
-				rt.streamingServer.ServeHTTP(w, r)
-				return
+			if mountpoint != "" && mountpoint != "/" {
+				// Check if this is a federated stream request
+				// Federated streams use /stream/federated/{uuid} format
+				if strings.HasPrefix(mountpoint, "/stream/federated/") {
+					if rt.proxyHandler != nil {
+						// Rewrite the request path to the federated stream path
+						r.URL.Path = mountpoint
+						rt.proxyHandler.ServeHTTP(w, r)
+					} else {
+						http.Error(w, "Federation not enabled", http.StatusServiceUnavailable)
+					}
+					return
+				}
+
+				// Local stream - forward to streaming server
+				if rt.streamingServer != nil {
+					r.URL.Path = mountpoint
+					rt.streamingServer.ServeHTTP(w, r)
+					return
+				}
 			}
 		}
 

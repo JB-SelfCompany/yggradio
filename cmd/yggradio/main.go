@@ -23,7 +23,7 @@ import (
 
 var (
 	// Version is set at build time
-	Version = "1.1.1"
+	Version = "1.2.0"
 
 	// Command line flags
 	configPath = flag.String("config", "~/.yggradio/config.yaml", "Path to configuration file")

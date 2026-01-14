@@ -150,7 +150,8 @@ database:
 # Federation Configuration
 federation:
   # Pull interval: How often to pull station lists from registered nodes (seconds)
-  pull_interval: ` + fmt.Sprintf("%d", cfg.Federation.PullInterval) + `  # 5 minutes
+  # Minimum: 30 seconds, Default: 60 seconds (1 minute)
+  pull_interval: ` + fmt.Sprintf("%d", cfg.Federation.PullInterval) + `
 
   # Node timeout: Mark nodes offline if not seen within this time (seconds)
   node_timeout: ` + fmt.Sprintf("%d", cfg.Federation.NodeTimeout) + `  # 1 minute
@@ -195,8 +196,8 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate pull interval
-	if c.Federation.PullInterval < 60 {
-		return fmt.Errorf("pull_interval must be at least 60 seconds")
+	if c.Federation.PullInterval < 30 {
+		return fmt.Errorf("pull_interval must be at least 30 seconds")
 	}
 
 	// Validate node timeout
@@ -245,7 +246,7 @@ func DefaultConfig() *Config {
 			Path: "~/.yggradio-federation/federation.db",
 		},
 		Federation: FederationConfig{
-			PullInterval:           300,  // 5 minutes
+			PullInterval:           60,   // 1 minute (was 5 minutes)
 			NodeTimeout:            60,   // 1 minute
 			MaxConsecutiveFailures: 3,
 			StationTTL:             3600, // 1 hour

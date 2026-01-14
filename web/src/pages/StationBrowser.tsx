@@ -28,7 +28,7 @@ export default function StationBrowser() {
   const { data: stationsResponse, isLoading, error, refetch } = useQuery<{ stations: Station[] }>({
     queryKey: ['stations', isAuthenticated, sortBy, sortOrder], // Re-fetch when auth state or sorting changes
     queryFn: () => api.get<{ stations: Station[] }>(`/stations?sort_by=${sortBy}&sort_order=${sortOrder}`, false, true), // optionalAuth = true
-    refetchInterval: 10000, // Refresh every 10 seconds
+    refetchInterval: 30000, // Refresh every 30 seconds (reduced from 10s to minimize browser logs)
   });
 
   const stations = stationsResponse?.stations;
@@ -310,14 +310,14 @@ export default function StationBrowser() {
               </p>
             )}
 
-            {/* Current Track */}
-            {(station.metadata_title || (station.external_stream_url && station.status === 'online')) && (
+            {/* Now Playing - only show when station is online */}
+            {station.status === 'online' && (
               <div className="mb-4 p-3 bg-gray-800 rounded text-sm">
                 <div className="text-gray-500 text-xs mb-1">
-                  {station.status === 'online' ? 'Now Playing:' : 'Last Playing:'}
+                  Now Playing
                 </div>
-                <div className="font-medium break-words">
-                  {station.metadata_title || 'External Source'}
+                <div className="font-medium break-words text-gray-400">
+                  {station.metadata_title || 'No metadata'}
                 </div>
               </div>
             )}

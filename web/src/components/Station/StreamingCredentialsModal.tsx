@@ -607,14 +607,6 @@ export default function StreamingCredentialsModal({
                 <strong>Note:</strong> Always use MP3 codec (libmp3lame) with <code>-vn</code> flag to exclude video/images
               </p>
             </div>
-
-            {/* External Players Warning */}
-            <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-700/50 rounded">
-              <p className="text-sm text-yellow-200">
-                <strong>Note:</strong> External players (VLC, AIMP, Winamp) are not supported.
-                Listeners should use the built-in web player.
-              </p>
-            </div>
           </div>
         )}
 

@@ -32,23 +32,26 @@ func NewRemoteClient(validator *security.Validator, logger *log.Logger) *RemoteC
 	// Create HTTP client optimized for Yggdrasil mesh network
 	// Note: Yggdrasil provides end-to-end encryption at the network layer, so HTTPS is not required
 	transport := &http.Transport{
-		// Dial settings optimized for mesh network
+		// Dial settings optimized for high-latency mesh network
 		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
+			Timeout:   60 * time.Second, // Increased for Yggdrasil latency
 			KeepAlive: 60 * time.Second,
 		}).DialContext,
 
-		// Connection pooling to reduce overhead
-		MaxIdleConns:          10,
-		MaxIdleConnsPerHost:   2,
-		IdleConnTimeout:       90 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
+		// Connection pooling - increased for streaming
+		MaxIdleConns:          20,
+		MaxIdleConnsPerHost:   5, // Increased for multiple listeners
+		IdleConnTimeout:       120 * time.Second,
+		ExpectContinueTimeout: 2 * time.Second,
 
 		// Enable keep-alives for better performance
 		DisableKeepAlives: false,
 
-		// Response header timeout to prevent slowloris attacks
-		ResponseHeaderTimeout: 10 * time.Second,
+		// Response header timeout - increased for Yggdrasil latency
+		ResponseHeaderTimeout: 30 * time.Second,
+
+		// Disable compression to avoid re-encoding audio streams
+		DisableCompression: true,
 	}
 
 	httpClient := &http.Client{

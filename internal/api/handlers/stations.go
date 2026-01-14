@@ -195,17 +195,12 @@ func (h *StationHandler) ListStations(w http.ResponseWriter, r *http.Request) {
 		} else {
 			// Add federated stations to response
 			for _, fs := range federatedStations {
-				// Use NodeAddress if available, otherwise fall back to NodeUUID
-				nodeIdentifier := fs.SourceNode // Default to UUID
-				if fs.SourceNodeAddress.Valid && fs.SourceNodeAddress.String != "" {
-					nodeIdentifier = fs.SourceNodeAddress.String // Use IPv6 address if available
-				}
-
+				// Use simplified URL format with UUID for easier routing
 				item := map[string]interface{}{
 					"id":              0, // No local ID for federated stations
 					"uuid":            fs.UUID,
 					"name":            fs.Name,
-					"mountpoint":      fmt.Sprintf("/stream/federated/%s%s", nodeIdentifier, fs.Mountpoint),
+					"mountpoint":      fmt.Sprintf("/stream/federated/%s", fs.UUID), // Simplified URL format
 					"owner_pubkey":    fs.OwnerPubkey,
 					"status":          fs.Status,
 					"listeners_count": fs.ListenersCount,

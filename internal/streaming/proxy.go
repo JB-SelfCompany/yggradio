@@ -43,6 +43,7 @@ type ProxyHandler struct {
 // proxySession tracks an active proxy connection
 type proxySession struct {
 	nodeAddress    string
+	nodePort       int
 	mountpoint     string
 	listeners      int32
 	createdAt      time.Time
@@ -98,7 +99,7 @@ func NewProxyHandler(
 	}
 }
 
-// ServeHTTP handles GET /stream/federated/{node_address}/{mountpoint}
+// ServeHTTP handles GET /stream/federated/{uuid}
 func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Only allow GET requests
 	if r.Method != http.MethodGet {
@@ -109,33 +110,15 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Extract client IP for rate limiting
 	clientIP := extractIPv6(r.RemoteAddr)
 
-	// Parse URL path: /stream/federated/{node_address}/{mountpoint}
-	// Example: /stream/federated/200:1234:5678::/live.mp3
+	// Parse URL path: /stream/federated/{uuid}
+	// Example: /stream/federated/550e8400-e29b-41d4-a716-446655440000
 	path := strings.TrimPrefix(r.URL.Path, "/stream/federated/")
-	parts := strings.SplitN(path, "/", 2)
+	stationUUID := path
 
-	if len(parts) != 2 {
-		ph.auditLogger.Log("proxy_invalid_path", "low", "", r.URL.Path, "Invalid proxy path format")
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-
-	nodeAddress := parts[0]
-	mountpoint := "/" + parts[1] // Add leading slash for mountpoint
-
-	// Security validation: validate Yggdrasil IPv6 address
-	if err := ph.validator.ValidateYggdrasilIPv6(nodeAddress); err != nil {
-		ph.auditLogger.Log("proxy_invalid_address", "medium", "", nodeAddress, fmt.Sprintf("Invalid Yggdrasil address: %v", err))
-		ph.logger.Printf("SECURITY: Rejected invalid Yggdrasil address: %s - %v", nodeAddress, err)
-		http.Error(w, "Invalid node address", http.StatusBadRequest)
-		return
-	}
-
-	// Security validation: validate mountpoint
-	if err := ph.validator.ValidateMountpoint(mountpoint); err != nil {
-		ph.auditLogger.Log("proxy_invalid_mountpoint", "medium", "", mountpoint, fmt.Sprintf("Invalid mountpoint: %v", err))
-		ph.logger.Printf("SECURITY: Rejected invalid mountpoint: %s - %v", mountpoint, err)
-		http.Error(w, "Invalid mountpoint", http.StatusBadRequest)
+	// Security validation: validate UUID format (basic check)
+	if stationUUID == "" || len(stationUUID) < 8 {
+		ph.auditLogger.Log("proxy_invalid_uuid", "low", "", r.URL.Path, "Invalid station UUID format")
+		http.Error(w, "Invalid station UUID", http.StatusBadRequest)
 		return
 	}
 
@@ -156,11 +139,11 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Lookup station in federated cache by IPv6 address
-	station, err := ph.db.GetFederatedStationCacheByAddress(nodeAddress, mountpoint)
+	// Lookup station in federated cache by UUID
+	station, err := ph.db.GetFederatedStationCacheByUUID(stationUUID)
 	if err == sql.ErrNoRows || station == nil {
-		ph.auditLogger.Log("proxy_station_not_found", "low", "", fmt.Sprintf("%s%s", nodeAddress, mountpoint), "Station not in federated cache")
-		ph.logger.Printf("Station not found in federated cache: %s%s", nodeAddress, mountpoint)
+		ph.auditLogger.Log("proxy_station_not_found", "low", "", stationUUID, "Station not in federated cache")
+		ph.logger.Printf("Station not found in federated cache: %s", stationUUID)
 		http.Error(w, "Station not found", http.StatusNotFound)
 		return
 	}
@@ -170,16 +153,32 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate that station has required fields
+	if !station.SourceNodeAddress.Valid || station.SourceNodeAddress.String == "" {
+		ph.logger.Printf("ERROR: Station %s has no source node address", stationUUID)
+		http.Error(w, "Invalid station configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Get port (default to 8080 if not set)
+	nodePort := ph.serverPort
+	if station.SourceNodePort.Valid && station.SourceNodePort.Int64 > 0 {
+		nodePort = int(station.SourceNodePort.Int64)
+	}
+
+	nodeAddress := station.SourceNodeAddress.String
+	mountpoint := station.Mountpoint
+
 	// Check if station is online
 	if station.Status != "online" {
 		http.Error(w, "Station is offline", http.StatusServiceUnavailable)
 		return
 	}
 
-	// Get or create proxy session
-	session, err := ph.getOrCreateSession(nodeAddress, mountpoint, ph.serverPort)
+	// Get or create proxy session with the correct port
+	session, err := ph.getOrCreateSession(nodeAddress, mountpoint, nodePort)
 	if err != nil {
-		ph.logger.Printf("ERROR: Failed to create proxy session: %v", err)
+		ph.logger.Printf("ERROR: Failed to create proxy session for %s (port %d): %v", nodeAddress, nodePort, err)
 		http.Error(w, "Failed to connect to remote stream", http.StatusBadGateway)
 		return
 	}
@@ -252,6 +251,7 @@ func (ph *ProxyHandler) getOrCreateSession(nodeAddress, mountpoint string, port 
 	now := time.Now()
 	session = &proxySession{
 		nodeAddress:  nodeAddress,
+		nodePort:     port,
 		mountpoint:   mountpoint,
 		listeners:    0,
 		createdAt:    now,
@@ -266,10 +266,10 @@ func (ph *ProxyHandler) getOrCreateSession(nodeAddress, mountpoint string, port 
 
 	ph.activeProxies[key] = session
 
-	ph.logger.Printf("Created new proxy session: %s%s", nodeAddress, mountpoint)
+	ph.logger.Printf("Created new proxy session: %s:%d%s", nodeAddress, port, mountpoint)
 
 	// Start metadata update worker
-	go ph.metadataUpdateWorker(session, nodeAddress, mountpoint)
+	go ph.metadataUpdateWorker(session, nodeAddress, mountpoint, port)
 
 	// Start health monitor
 	go ph.healthMonitor(session, nodeAddress, mountpoint)
@@ -278,9 +278,27 @@ func (ph *ProxyHandler) getOrCreateSession(nodeAddress, mountpoint string, port 
 }
 
 // streamToClient streams audio data from remote source to local client
+// IMPORTANT: Each client gets its own connection to prevent stream corruption
 func (ph *ProxyHandler) streamToClient(w http.ResponseWriter, r *http.Request, session *proxySession, station *database.FederatedStation) {
+	// Create a dedicated connection for this client
+	// This is critical - sharing one streamReader between multiple clients causes audio corruption
+	streamConfig := &RemoteStreamConfig{
+		NodeAddress: session.nodeAddress,
+		NodePort:    session.nodePort,
+		Mountpoint:  session.mountpoint,
+		Timeout:     ph.streamTimeout,
+	}
+
+	clientStream, err := ph.remoteClient.Connect(r.Context(), streamConfig)
+	if err != nil {
+		ph.logger.Printf("ERROR: Failed to create client stream for %s%s: %v", session.nodeAddress, session.mountpoint, err)
+		http.Error(w, "Failed to connect to remote stream", http.StatusBadGateway)
+		return
+	}
+	defer clientStream.Close()
+
 	// Set streaming headers
-	w.Header().Set("Content-Type", session.streamReader.ContentType())
+	w.Header().Set("Content-Type", clientStream.ContentType())
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
@@ -299,7 +317,7 @@ func (ph *ProxyHandler) streamToClient(w http.ResponseWriter, r *http.Request, s
 	}
 
 	// Add current ICY metadata from stream (if available)
-	if currentMetadata := session.streamReader.GetMetadata(); currentMetadata != "" {
+	if currentMetadata := clientStream.GetMetadata(); currentMetadata != "" {
 		w.Header().Set("icy-title", currentMetadata)
 	}
 
@@ -307,41 +325,32 @@ func (ph *ProxyHandler) streamToClient(w http.ResponseWriter, r *http.Request, s
 	w.WriteHeader(http.StatusOK)
 
 	// Flush headers immediately
-	if flusher, ok := w.(http.Flusher); ok {
+	flusher, canFlush := w.(http.Flusher)
+	if canFlush {
 		flusher.Flush()
 	}
 
-	// Create buffer for streaming
-	buffer := make([]byte, 8192) // 8KB buffer for audio chunks
+	// Streaming buffer - larger for high-latency Yggdrasil networks
+	buffer := make([]byte, 16384) // 16KB buffer
 
 	// Stream data from remote to client
 	for {
 		// Check if client disconnected
 		select {
 		case <-r.Context().Done():
-			ph.logger.Printf("Client disconnected from proxy stream: %s%s", session.nodeAddress, session.mountpoint)
 			return
 		case <-session.ctx.Done():
-			ph.logger.Printf("Proxy session timeout: %s%s", session.nodeAddress, session.mountpoint)
-			http.Error(w, "Stream timeout", http.StatusGatewayTimeout)
 			return
 		default:
 		}
 
-		// Read from remote stream
-		n, err := session.streamReader.Read(buffer)
+		// Read from this client's dedicated stream
+		n, err := clientStream.Read(buffer)
 		if err != nil {
-			// Update session error state
-			session.mu.Lock()
-			session.streamError = err
-			session.mu.Unlock()
-
 			if err == io.EOF {
-				// Remote stream ended normally
-				ph.logger.Printf("Remote stream ended: %s%s", session.nodeAddress, session.mountpoint)
 				return
 			}
-			// Only log unexpected errors (not timeout/context deadline which are normal)
+			// Silently return on expected errors
 			if !strings.Contains(err.Error(), "context deadline exceeded") &&
 			   !strings.Contains(err.Error(), "context canceled") {
 				ph.logger.Printf("ERROR: Failed to read from remote stream: %v", err)
@@ -353,26 +362,19 @@ func (ph *ProxyHandler) streamToClient(w http.ResponseWriter, r *http.Request, s
 		if n > 0 {
 			_, writeErr := w.Write(buffer[:n])
 			if writeErr != nil {
-				// Only log unexpected errors (not broken pipe which is normal on client disconnect)
-				if !strings.Contains(writeErr.Error(), "broken pipe") &&
-				   !strings.Contains(writeErr.Error(), "connection reset") &&
-				   !strings.Contains(writeErr.Error(), "forcibly closed") {
-					ph.logger.Printf("ERROR: Failed to write to client: %v", writeErr)
-				}
 				return
 			}
 
 			// Flush data to client
-			if flusher, ok := w.(http.Flusher); ok {
+			if canFlush {
 				flusher.Flush()
 			}
 
-			// Update last activity and last read time
+			// Update session activity for health monitoring
 			now := time.Now()
 			session.mu.Lock()
 			session.lastActivity = now
 			session.lastReadTime = now
-			session.streamError = nil // Clear error on successful read
 			session.mu.Unlock()
 		}
 	}
@@ -448,7 +450,7 @@ func (ph *ProxyHandler) GetStats() map[string]interface{} {
 }
 
 // metadataUpdateWorker periodically updates metadata in the cache database
-func (ph *ProxyHandler) metadataUpdateWorker(session *proxySession, nodeAddress, mountpoint string) {
+func (ph *ProxyHandler) metadataUpdateWorker(session *proxySession, nodeAddress, mountpoint string, nodePort int) {
 	ticker := time.NewTicker(2 * time.Second) // Update every 2 seconds for faster metadata refresh
 	defer ticker.Stop()
 
@@ -468,12 +470,12 @@ func (ph *ProxyHandler) metadataUpdateWorker(session *proxySession, nodeAddress,
 
 			// If stream has errors or hasn't received data in 30 seconds, stop updating
 			if streamErr != nil || time.Since(lastRead) > 30*time.Second {
-				ph.logger.Printf("WARNING: Stream unhealthy for %s%s, stopping metadata updates", nodeAddress, mountpoint)
+				ph.logger.Printf("WARNING: Stream unhealthy for %s:%d%s, stopping metadata updates", nodeAddress, nodePort, mountpoint)
 				return
 			}
 
 			// Fetch fresh metadata from the remote station's API
-			freshMetadata := ph.fetchRemoteMetadata(nodeAddress, mountpoint)
+			freshMetadata := ph.fetchRemoteMetadata(nodeAddress, mountpoint, nodePort)
 
 			// If we got fresh metadata, update it
 			if freshMetadata != "" {
@@ -483,8 +485,6 @@ func (ph *ProxyHandler) metadataUpdateWorker(session *proxySession, nodeAddress,
 				changed := freshMetadata != session.lastMetadata
 				if changed {
 					session.lastMetadata = freshMetadata
-					// Also update the stream reader's metadata
-					session.streamReader.SetMetadata(freshMetadata)
 				}
 				session.mu.Unlock()
 
@@ -518,16 +518,16 @@ func (ph *ProxyHandler) metadataUpdateWorker(session *proxySession, nodeAddress,
 }
 
 // fetchRemoteMetadata fetches current metadata from the remote station's API
-func (ph *ProxyHandler) fetchRemoteMetadata(nodeAddress, mountpoint string) string {
+func (ph *ProxyHandler) fetchRemoteMetadata(nodeAddress, mountpoint string, nodePort int) string {
 	// Get station info from local cache first
 	station, err := ph.db.GetFederatedStationCacheByAddress(nodeAddress, mountpoint)
 	if err != nil || station == nil {
 		return ""
 	}
 
-	// Make a quick HEAD request to the remote stream to get current ICY headers
+	// Make a quick request to the remote station's API to get current metadata
 	// This is much faster than fetching from federation server
-	url := fmt.Sprintf("http://[%s]:%d/api/stations", nodeAddress, ph.serverPort)
+	url := fmt.Sprintf("http://[%s]:%d/api/stations", nodeAddress, nodePort)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

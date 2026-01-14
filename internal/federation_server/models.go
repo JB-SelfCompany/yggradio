@@ -104,6 +104,7 @@ type StationPublic struct {
 	UUID           string  `json:"uuid"`
 	NodeUUID       string  `json:"node_uuid"`
 	NodeAddress    string  `json:"node_address,omitempty"` // Yggdrasil IPv6 address
+	NodePort       int     `json:"node_port,omitempty"`    // Port of the source node
 	NodeName       string  `json:"node_name,omitempty"`
 	Name           string  `json:"name"`
 	Description    string  `json:"description,omitempty"`

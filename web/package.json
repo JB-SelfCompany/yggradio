@@ -1,6 +1,6 @@
 {
   "name": "yggradio-frontend",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "YggRadio - Decentralized P2P Radio Platform",
   "type": "module",
   "scripts": {

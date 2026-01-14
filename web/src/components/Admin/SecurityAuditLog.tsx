@@ -34,7 +34,7 @@ export default function SecurityAuditLog() {
         true
       );
     },
-    refetchInterval: 10000, // Refresh every 10 seconds
+    refetchInterval: 30000, // Refresh every 30 seconds (reduced from 10s to minimize browser logs)
   });
 
   const getSeverityIcon = (severity: AuditEntry['severity']) => {

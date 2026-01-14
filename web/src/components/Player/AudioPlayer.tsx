@@ -11,6 +11,12 @@ export default function AudioPlayer() {
   const hlsRef = useRef<Hls | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [bufferStatus, setBufferStatus] = useState<string>('Connecting...');
+  const errorRetryCountRef = useRef<number>(0);
+  const errorRetryTimeoutRef = useRef<number | null>(null);
+  const lastStreamUrlRef = useRef<string>('');
+  const isDirectStreamRef = useRef<boolean>(false);
+  const bufferCleanupIntervalRef = useRef<number | null>(null);
+  const streamStartTimeRef = useRef<number>(0);
 
   const {
     isPlaying,
@@ -44,9 +50,84 @@ export default function AudioPlayer() {
       stop();
     };
 
-    const handleError = (e: ErrorEvent) => {
-      console.error('Audio playback error:', e);
-      pause();
+    const handleError = () => {
+      const audio = audioRef.current;
+      if (!audio) return;
+
+      const error = audio.error;
+      if (!error) return;
+
+      console.error('Audio playback error:', {
+        code: error.code,
+        message: error.message,
+        MEDIA_ERR_ABORTED: error.code === 1,
+        MEDIA_ERR_NETWORK: error.code === 2,
+        MEDIA_ERR_DECODE: error.code === 3,
+        MEDIA_ERR_SRC_NOT_SUPPORTED: error.code === 4,
+      });
+
+      // Try to recover from decode errors for all non-HLS streams
+      if (error.code === 3 && isPlaying) {
+        // MEDIA_ERR_DECODE - попытаться переподключиться
+        const maxRetries = 5; // Увеличил до 5 попыток
+
+        if (errorRetryCountRef.current < maxRetries) {
+          errorRetryCountRef.current += 1;
+          const retryDelay = 1000 * errorRetryCountRef.current; // 1s, 2s, 3s, 4s, 5s
+
+          console.log(`Decode error detected, retrying in ${retryDelay}ms (attempt ${errorRetryCountRef.current}/${maxRetries})`);
+
+          // Очистить предыдущий таймер если есть
+          if (errorRetryTimeoutRef.current) {
+            clearTimeout(errorRetryTimeoutRef.current);
+          }
+
+          errorRetryTimeoutRef.current = setTimeout(() => {
+            if (!audio) return;
+
+            console.log('Reconnecting to stream...');
+
+            // Для MSE player - нужно пересоздать
+            if (playerRef.current) {
+              console.log('Recreating MSE player...');
+              playerRef.current.destroy();
+              playerRef.current = null;
+
+              // Перезапустить через обновление URL
+              const currentUrl = lastStreamUrlRef.current || audio.dataset['streamUrl'];
+              if (currentUrl) {
+                audio.src = '';
+                audio.load();
+
+                // Небольшая задержка перед перезапуском
+                setTimeout(() => {
+                  // Триггерим перезагрузку через изменение src
+                  audio.src = currentUrl;
+                  audio.load();
+                  audio.play().catch((err) => {
+                    console.error('Failed to reconnect MSE:', err);
+                  });
+                }, 100);
+              }
+            } else if (lastStreamUrlRef.current || audio.src) {
+              // Для direct потоков - просто перезагрузить
+              const streamUrl = lastStreamUrlRef.current || audio.src;
+              audio.src = streamUrl;
+              audio.load();
+              audio.play().catch((err) => {
+                console.error('Failed to reconnect:', err);
+                pause();
+              });
+            }
+          }, retryDelay);
+        } else {
+          console.error('Maximum retry attempts reached, stopping playback');
+          pause();
+        }
+      } else {
+        // Для других типов ошибок - просто остановить
+        pause();
+      }
     };
 
     const handleWaiting = () => {
@@ -58,7 +139,12 @@ export default function AudioPlayer() {
     };
 
     const handlePlaying = () => {
-      // Audio is playing
+      // Audio is playing - сбросить счетчик ошибок при успешном воспроизведении
+      errorRetryCountRef.current = 0;
+      if (errorRetryTimeoutRef.current) {
+        clearTimeout(errorRetryTimeoutRef.current);
+        errorRetryTimeoutRef.current = null;
+      }
     };
 
     const handleStalled = () => {
@@ -91,6 +177,15 @@ export default function AudioPlayer() {
     const audio = audioRef.current;
     if (!audio || !currentStreamUrl) return;
 
+    // Reset error retry counter when switching streams
+    errorRetryCountRef.current = 0;
+    if (errorRetryTimeoutRef.current) {
+      clearTimeout(errorRetryTimeoutRef.current);
+      errorRetryTimeoutRef.current = null;
+    }
+    isDirectStreamRef.current = false;
+    lastStreamUrlRef.current = '';
+
     // Cleanup previous players
     if (playerRef.current) {
       playerRef.current.destroy();
@@ -105,8 +200,11 @@ export default function AudioPlayer() {
     const isExternalHLS = currentStation?.external_stream_type === 'hls' &&
                           currentStation?.hls_proxy_url;
 
-    // Use MSE for Yggdrasil streams to get full buffer control
+    // MSE (MediaSource Extensions) does NOT support audio/mpeg (MP3) in most browsers
+    // So we can only use MSE for direct Yggdrasil IPv6 streams with supported codecs (Opus/AAC)
+    // Federated streams use direct playback since they're typically MP3
     const isYggdrasil = isYggdrasilStream(currentStreamUrl);
+    const isFederatedYggdrasil = isYggdrasil && currentStation?.is_federated;
 
     if (isExternalHLS && Hls.isSupported()) {
       // Use HLS.js for external HLS streams via proxy
@@ -114,7 +212,9 @@ export default function AudioPlayer() {
         debug: false,
         enableWorker: true,
         lowLatencyMode: false,
-        backBufferLength: 90,
+        backBufferLength: 10, // Aggressive: keep only 10s behind playhead to prevent memory leak
+        maxBufferLength: 15,  // Aggressive: buffer only 15s ahead
+        maxMaxBufferLength: 20, // Aggressive: absolute max 20s
       });
 
       hlsRef.current = hls;
@@ -151,19 +251,39 @@ export default function AudioPlayer() {
           }
         }
       });
-    } else if (isYggdrasil && currentStation) {
-      // Using MSE player for Yggdrasil stream
+    } else if (isFederatedYggdrasil && currentStation) {
+      // MSE player only for direct Yggdrasil streams with supported codecs
+      // Note: audio/mpeg (MP3) is NOT supported by MSE in most browsers!
+      const contentType = currentStation.content_type || 'audio/mpeg';
+      const mimeType = detectMimeType(contentType);
 
-      // Detect MIME type from station content type or default to MP3
-      const mimeType = detectMimeType(currentStation.content_type || 'audio/mpeg');
+      // Check if MSE actually supports this MIME type
+      if (MediaSource.isTypeSupported(mimeType)) {
+        lastStreamUrlRef.current = currentStreamUrl;
+        playerRef.current = new MSEAudioPlayer(audio, mimeType);
+        audio.dataset['streamUrl'] = currentStreamUrl;
+        playerRef.current.setMinBufferSeconds(3.0);
+      } else {
+        // Fallback to direct playback for unsupported codecs (like MP3)
+        console.log(`MSE does not support ${mimeType}, using direct playback`);
+        isDirectStreamRef.current = true;
+        lastStreamUrlRef.current = currentStreamUrl;
+        streamStartTimeRef.current = Date.now();
+        audio.src = currentStreamUrl;
+        audio.load();
 
-      playerRef.current = new MSEAudioPlayer(audio, mimeType);
-      audio.dataset['streamUrl'] = currentStreamUrl;
-
-      // For Yggdrasil: can start playing after just 1.5 seconds buffered
-      playerRef.current.setMinBufferSeconds(1.5);
+        if (isPlaying) {
+          audio.play().catch((error) => {
+            console.error('Failed to play audio:', error);
+            pause();
+          });
+        }
+      }
     } else {
       // Direct playback for regular internet or native HLS support
+      isDirectStreamRef.current = true;
+      lastStreamUrlRef.current = currentStreamUrl;
+      streamStartTimeRef.current = Date.now();
       audio.src = currentStreamUrl;
       audio.load();
 
@@ -173,6 +293,29 @@ export default function AudioPlayer() {
           pause();
         });
       }
+
+      // For direct streams: periodically reload to prevent Firefox memory leak
+      // Check every 30 minutes if stream has been playing for 2+ hours
+      if (bufferCleanupIntervalRef.current) {
+        clearInterval(bufferCleanupIntervalRef.current);
+      }
+
+      bufferCleanupIntervalRef.current = setInterval(() => {
+        const elapsedMs = Date.now() - streamStartTimeRef.current;
+        const elapsedHours = elapsedMs / (1000 * 60 * 60);
+
+        // Reload stream every 2 hours to clear browser buffers
+        if (elapsedHours >= 2 && isPlaying && audio.src === currentStreamUrl) {
+          console.log('Direct stream: reloading to clear buffers (played for 2+ hours)');
+          const currentTime = audio.currentTime;
+          audio.load();
+          audio.currentTime = currentTime;
+          audio.play().catch((error) => {
+            console.error('Failed to reload stream:', error);
+          });
+          streamStartTimeRef.current = Date.now(); // Reset timer
+        }
+      }, 30 * 60 * 1000); // Check every 30 minutes
     }
 
     return () => {
@@ -183,6 +326,14 @@ export default function AudioPlayer() {
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
+      }
+      if (errorRetryTimeoutRef.current) {
+        clearTimeout(errorRetryTimeoutRef.current);
+        errorRetryTimeoutRef.current = null;
+      }
+      if (bufferCleanupIntervalRef.current) {
+        clearInterval(bufferCleanupIntervalRef.current);
+        bufferCleanupIntervalRef.current = null;
       }
     };
   }, [currentStreamUrl, currentStation, isPlaying, pause]);
@@ -199,6 +350,16 @@ export default function AudioPlayer() {
       });
     } else {
       audio.pause();
+      // При остановке воспроизведения - сбросить счетчик ошибок и очистить таймеры
+      errorRetryCountRef.current = 0;
+      if (errorRetryTimeoutRef.current) {
+        clearTimeout(errorRetryTimeoutRef.current);
+        errorRetryTimeoutRef.current = null;
+      }
+      if (bufferCleanupIntervalRef.current) {
+        clearInterval(bufferCleanupIntervalRef.current);
+        bufferCleanupIntervalRef.current = null;
+      }
     }
   }, [isPlaying, pause]);
 
@@ -219,7 +380,7 @@ export default function AudioPlayer() {
       setMetadata(currentStation.metadata_title);
     }
 
-    // Poll every 10 seconds for metadata updates
+    // Poll every 30 seconds for metadata updates (reduced from 10s to minimize browser logs)
     const pollInterval = setInterval(async () => {
       try {
         // For federated stations, we need to fetch from the stations list
@@ -248,7 +409,7 @@ export default function AudioPlayer() {
       } catch (error) {
         // Silently fail - metadata updates are not critical
       }
-    }, 10000);
+    }, 30000);
 
     return () => clearInterval(pollInterval);
   }, [currentStation, isPlaying, setMetadata]);
@@ -377,10 +538,11 @@ export default function AudioPlayer() {
   }
 
   // For radio stations: always show track info on top, station name on bottom
-  // Top: track title (or "No track info" if unavailable)
+  // Top: track title, or "Now Playing" header with "No metadata" if unavailable
   // Bottom: station name
-  const displayTitle = currentMetadata || 'No track info';
+  const displayTitle = currentMetadata || 'No metadata';
   const displaySubtitle = currentStation?.name || 'Unknown Station';
+  const hasNoMetadata = !currentMetadata;
 
   return (
     <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-700 shadow-lg z-50">
@@ -410,9 +572,18 @@ export default function AudioPlayer() {
 
             {/* Track Info */}
             <div className="flex-1 min-w-0 px-2">
-              <div className="font-semibold text-white text-sm break-words line-clamp-2">
-                {displayTitle}
-              </div>
+              {hasNoMetadata ? (
+                <>
+                  <div className="text-xs text-gray-400">Now Playing</div>
+                  <div className="font-semibold text-white text-sm break-words line-clamp-2">
+                    {displayTitle}
+                  </div>
+                </>
+              ) : (
+                <div className="font-semibold text-white text-sm break-words line-clamp-2">
+                  {displayTitle}
+                </div>
+              )}
               {displaySubtitle && (
                 <div className="text-xs text-gray-400 truncate">
                   {displaySubtitle}
@@ -485,9 +656,18 @@ export default function AudioPlayer() {
 
           {/* Track Info */}
           <div className="flex-1 min-w-0">
-            <div className="font-semibold text-white truncate">
-              {displayTitle}
-            </div>
+            {hasNoMetadata ? (
+              <>
+                <div className="text-xs text-gray-400">Now Playing</div>
+                <div className="font-semibold text-white truncate">
+                  {displayTitle}
+                </div>
+              </>
+            ) : (
+              <div className="font-semibold text-white truncate">
+                {displayTitle}
+              </div>
+            )}
             {displaySubtitle && (
               <div className="text-sm text-gray-400 truncate">
                 {displaySubtitle}

@@ -266,6 +266,7 @@ type FederatedStation struct {
 	UUID              string
 	SourceNode        string
 	SourceNodeAddress sql.NullString // Yggdrasil IPv6 address
+	SourceNodePort    sql.NullInt64  // Port of the source node
 	SourceNodeName    sql.NullString
 	Name              string
 	Description       sql.NullString
@@ -286,7 +287,7 @@ type FederatedStation struct {
 // GetFederatedStationCache retrieves a cached federated station
 func (db *DB) GetFederatedStationCache(sourceNode, mountpoint string) (*FederatedStation, error) {
 	query := `
-		SELECT id, uuid, source_node, source_node_address, source_node_name, name, description,
+		SELECT id, uuid, source_node, source_node_address, source_node_port, source_node_name, name, description,
 		       mountpoint, owner_pubkey, status, listeners_count,
 		       content_type, bitrate, genre, metadata_title,
 		       average_rating, vote_count, cached_at, last_updated
@@ -296,7 +297,7 @@ func (db *DB) GetFederatedStationCache(sourceNode, mountpoint string) (*Federate
 
 	var fs FederatedStation
 	err := db.QueryRow(query, sourceNode, mountpoint).Scan(
-		&fs.ID, &fs.UUID, &fs.SourceNode, &fs.SourceNodeAddress, &fs.SourceNodeName,
+		&fs.ID, &fs.UUID, &fs.SourceNode, &fs.SourceNodeAddress, &fs.SourceNodePort, &fs.SourceNodeName,
 		&fs.Name, &fs.Description, &fs.Mountpoint, &fs.OwnerPubkey,
 		&fs.Status, &fs.ListenersCount, &fs.ContentType, &fs.Bitrate,
 		&fs.Genre, &fs.MetadataTitle, &fs.AverageRating, &fs.VoteCount,
@@ -317,14 +318,15 @@ func (db *DB) GetFederatedStationCache(sourceNode, mountpoint string) (*Federate
 func (db *DB) UpsertFederatedStationCache(station *FederatedStation) error {
 	query := `
 		INSERT INTO federated_station_cache (
-			uuid, source_node, source_node_address, source_node_name, name, description,
+			uuid, source_node, source_node_address, source_node_port, source_node_name, name, description,
 			mountpoint, owner_pubkey, status, listeners_count,
 			content_type, bitrate, genre, metadata_title,
 			average_rating, vote_count, last_updated
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(source_node, mountpoint) DO UPDATE SET
 			uuid = excluded.uuid,
 			source_node_address = excluded.source_node_address,
+			source_node_port = excluded.source_node_port,
 			source_node_name = excluded.source_node_name,
 			name = excluded.name,
 			description = excluded.description,
@@ -341,7 +343,7 @@ func (db *DB) UpsertFederatedStationCache(station *FederatedStation) error {
 	`
 
 	_, err := db.Exec(query,
-		station.UUID, station.SourceNode, station.SourceNodeAddress, station.SourceNodeName,
+		station.UUID, station.SourceNode, station.SourceNodeAddress, station.SourceNodePort, station.SourceNodeName,
 		station.Name, station.Description, station.Mountpoint,
 		station.OwnerPubkey, station.Status, station.ListenersCount,
 		station.ContentType, station.Bitrate, station.Genre,
@@ -362,14 +364,15 @@ func (db *DB) UpsertFederatedStationCache(station *FederatedStation) error {
 func (db *DB) UpsertFederatedStationCachePreserveMetadata(station *FederatedStation) error {
 	query := `
 		INSERT INTO federated_station_cache (
-			uuid, source_node, source_node_address, source_node_name, name, description,
+			uuid, source_node, source_node_address, source_node_port, source_node_name, name, description,
 			mountpoint, owner_pubkey, status, listeners_count,
 			content_type, bitrate, genre, metadata_title,
 			average_rating, vote_count, last_updated
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(source_node, mountpoint) DO UPDATE SET
 			uuid = excluded.uuid,
 			source_node_address = excluded.source_node_address,
+			source_node_port = excluded.source_node_port,
 			source_node_name = excluded.source_node_name,
 			name = excluded.name,
 			description = excluded.description,
@@ -385,7 +388,7 @@ func (db *DB) UpsertFederatedStationCachePreserveMetadata(station *FederatedStat
 	`
 
 	_, err := db.Exec(query,
-		station.UUID, station.SourceNode, station.SourceNodeAddress, station.SourceNodeName,
+		station.UUID, station.SourceNode, station.SourceNodeAddress, station.SourceNodePort, station.SourceNodeName,
 		station.Name, station.Description, station.Mountpoint,
 		station.OwnerPubkey, station.Status, station.ListenersCount,
 		station.ContentType, station.Bitrate, station.Genre,
@@ -402,7 +405,7 @@ func (db *DB) UpsertFederatedStationCachePreserveMetadata(station *FederatedStat
 // ListFederatedStationCache retrieves all cached federated stations
 func (db *DB) ListFederatedStationCache() ([]*FederatedStation, error) {
 	query := `
-		SELECT id, uuid, source_node, source_node_address, source_node_name, name, description,
+		SELECT id, uuid, source_node, source_node_address, source_node_port, source_node_name, name, description,
 		       mountpoint, owner_pubkey, status, listeners_count,
 		       content_type, bitrate, genre, metadata_title,
 		       average_rating, vote_count, cached_at, last_updated
@@ -420,7 +423,7 @@ func (db *DB) ListFederatedStationCache() ([]*FederatedStation, error) {
 	for rows.Next() {
 		var fs FederatedStation
 		err := rows.Scan(
-			&fs.ID, &fs.UUID, &fs.SourceNode, &fs.SourceNodeAddress, &fs.SourceNodeName,
+			&fs.ID, &fs.UUID, &fs.SourceNode, &fs.SourceNodeAddress, &fs.SourceNodePort, &fs.SourceNodeName,
 			&fs.Name, &fs.Description, &fs.Mountpoint, &fs.OwnerPubkey,
 			&fs.Status, &fs.ListenersCount, &fs.ContentType, &fs.Bitrate,
 			&fs.Genre, &fs.MetadataTitle, &fs.AverageRating, &fs.VoteCount,
@@ -458,7 +461,7 @@ func (db *DB) ExpireFederatedStationCache(olderThan time.Time) error {
 // GetFederatedStationCacheByAddress retrieves a cached federated station by IPv6 address
 func (db *DB) GetFederatedStationCacheByAddress(nodeAddress, mountpoint string) (*FederatedStation, error) {
 	query := `
-		SELECT id, uuid, source_node, source_node_address, source_node_name, name, description,
+		SELECT id, uuid, source_node, source_node_address, source_node_port, source_node_name, name, description,
 		       mountpoint, owner_pubkey, status, listeners_count,
 		       content_type, bitrate, genre, metadata_title,
 		       average_rating, vote_count, cached_at, last_updated
@@ -468,7 +471,7 @@ func (db *DB) GetFederatedStationCacheByAddress(nodeAddress, mountpoint string) 
 
 	var fs FederatedStation
 	err := db.QueryRow(query, nodeAddress, mountpoint).Scan(
-		&fs.ID, &fs.UUID, &fs.SourceNode, &fs.SourceNodeAddress, &fs.SourceNodeName,
+		&fs.ID, &fs.UUID, &fs.SourceNode, &fs.SourceNodeAddress, &fs.SourceNodePort, &fs.SourceNodeName,
 		&fs.Name, &fs.Description, &fs.Mountpoint, &fs.OwnerPubkey,
 		&fs.Status, &fs.ListenersCount, &fs.ContentType, &fs.Bitrate,
 		&fs.Genre, &fs.MetadataTitle, &fs.AverageRating, &fs.VoteCount,
@@ -480,6 +483,36 @@ func (db *DB) GetFederatedStationCacheByAddress(nodeAddress, mountpoint string) 
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get federated station cache by address: %w", err)
+	}
+
+	return &fs, nil
+}
+
+// GetFederatedStationCacheByUUID retrieves a cached federated station by UUID
+func (db *DB) GetFederatedStationCacheByUUID(uuid string) (*FederatedStation, error) {
+	query := `
+		SELECT id, uuid, source_node, source_node_address, source_node_port, source_node_name, name, description,
+		       mountpoint, owner_pubkey, status, listeners_count,
+		       content_type, bitrate, genre, metadata_title,
+		       average_rating, vote_count, cached_at, last_updated
+		FROM federated_station_cache
+		WHERE uuid = ?
+	`
+
+	var fs FederatedStation
+	err := db.QueryRow(query, uuid).Scan(
+		&fs.ID, &fs.UUID, &fs.SourceNode, &fs.SourceNodeAddress, &fs.SourceNodePort, &fs.SourceNodeName,
+		&fs.Name, &fs.Description, &fs.Mountpoint, &fs.OwnerPubkey,
+		&fs.Status, &fs.ListenersCount, &fs.ContentType, &fs.Bitrate,
+		&fs.Genre, &fs.MetadataTitle, &fs.AverageRating, &fs.VoteCount,
+		&fs.CachedAt, &fs.LastUpdated,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get federated station cache by UUID: %w", err)
 	}
 
 	return &fs, nil

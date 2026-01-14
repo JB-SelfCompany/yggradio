@@ -15,6 +15,7 @@ type FederatedStationResponse struct {
 	UUID           string  `json:"uuid"`
 	NodeUUID       string  `json:"node_uuid"`        // Changed from source_node to match server
 	NodeAddress    string  `json:"node_address"`     // Yggdrasil IPv6 address
+	NodePort       int     `json:"node_port"`        // Port of the source node
 	NodeName       string  `json:"node_name"`        // Changed from source_node_name to match server
 	Name           string  `json:"name"`
 	Description    string  `json:"description"`
@@ -116,6 +117,10 @@ func (c *Client) updateCache(stations []FederatedStationResponse) error {
 			SourceNodeAddress: sql.NullString{
 				String: station.NodeAddress, // Map NodeAddress to SourceNodeAddress
 				Valid:  station.NodeAddress != "",
+			},
+			SourceNodePort: sql.NullInt64{
+				Int64: int64(station.NodePort), // Map NodePort to SourceNodePort
+				Valid: station.NodePort > 0,
 			},
 			SourceNodeName: sql.NullString{
 				String: station.NodeName, // Map NodeName to SourceNodeName
