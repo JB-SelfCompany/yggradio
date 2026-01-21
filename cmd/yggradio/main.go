@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -19,30 +20,37 @@ import (
 	"github.com/JB-SelfCompany/yggradio/internal/security"
 	"github.com/JB-SelfCompany/yggradio/internal/streaming"
 	"github.com/JB-SelfCompany/yggradio/internal/utils"
+	"github.com/JB-SelfCompany/yggradio/internal/version"
 )
 
 var (
-	// Version is set at build time
-	Version = "1.2.0"
-
 	// Command line flags
-	configPath = flag.String("config", "~/.yggradio/config.yaml", "Path to configuration file")
-	version    = flag.Bool("version", false, "Show version information")
+	configPath   = flag.String("config", "~/.yggradio/config.yaml", "Path to configuration file")
+	showVersion  = flag.Bool("version", false, "Show version information")
+	listStations = flag.Bool("list-stations", false, "List all stations with details")
+	delStation   = flag.Int64("del-station", 0, "Delete station by ID")
+	dbPath       = flag.String("db", "", "Direct path to database file (overrides config)")
 )
 
 func main() {
 	flag.Parse()
 
 	// Show version and exit
-	if *version {
-		fmt.Printf("YggRadio version %s\n", Version)
+	if *showVersion {
+		fmt.Printf("YggRadio version %s\n", version.Version)
 		os.Exit(0)
+	}
+
+	// Handle CLI commands (list-stations, del-station)
+	if *listStations || *delStation > 0 {
+		runCLICommands()
+		return
 	}
 
 	// Setup logger
 	logger := log.New(os.Stdout, "[yggradio] ", log.LstdFlags|log.Lshortfile)
 
-	logger.Printf("Starting YggRadio v%s", Version)
+	logger.Printf("Starting YggRadio v%s", version.Version)
 
 	// Load configuration
 	cfg, err := config.Load(*configPath)
@@ -132,7 +140,7 @@ func main() {
 	go streamingServer.StartExternalStreamMonitor(monitorCtx, 60*time.Second)
 
 	// Initialize HTTP router
-	router := api.NewRouter(db, cfg, pubkey, privkey, yggAddr.String(), instanceURL, Version, logger, streamingServer)
+	router := api.NewRouter(db, cfg, pubkey, privkey, yggAddr.String(), instanceURL, version.Version, logger, streamingServer)
 	handler := router.Setup()
 	defer router.Stop() // Stop federation components on shutdown
 
@@ -198,4 +206,169 @@ func startMaintenanceTasks(db *database.DB, logger *log.Logger, cfg *config.Conf
 			logger.Printf("Maintenance error (audit logs): %v", err)
 		}
 	}
+}
+
+// runCLICommands handles CLI commands without starting the server
+func runCLICommands() {
+	// Silent logger for CLI operations
+	silentLogger := log.New(os.Stderr, "", 0)
+
+	// Determine database path
+	var databasePath string
+	if *dbPath != "" {
+		// Use direct --db flag (highest priority)
+		databasePath = utils.ExpandPath(*dbPath)
+	} else {
+		// Load from config
+		cfg, err := config.Load(*configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: Failed to load configuration: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Config path: %s\n", *configPath)
+			fmt.Fprintf(os.Stderr, "Hint: Use --db /path/to/yggradio.db to specify database directly\n")
+			os.Exit(1)
+		}
+		databasePath = cfg.Database.Path
+	}
+
+	// Initialize database (silent mode)
+	quietLogger := log.New(io.Discard, "", 0)
+	db, err := database.New(databasePath, quietLogger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Failed to connect to database: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Database path: %s\n", databasePath)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	// Apply migrations silently
+	if err := database.RunMigrations(db.DB, quietLogger); err != nil {
+		silentLogger.Printf("Warning: migration error: %v\n", err)
+	}
+
+	// Execute CLI command
+	if *listStations {
+		fmt.Fprintf(os.Stderr, "Using database: %s\n", databasePath)
+		if err := cliListStations(db); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	} else if *delStation > 0 {
+		if err := cliDeleteStation(db, *delStation); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+}
+
+// cliListStations lists all stations in a formatted table
+func cliListStations(db *database.DB) error {
+	query := `
+		SELECT id, name, mountpoint, owner_pubkey, status, listeners_count, created_at
+		FROM stations
+		ORDER BY id ASC
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return fmt.Errorf("failed to query stations: %w", err)
+	}
+	defer rows.Close()
+
+	type stationInfo struct {
+		ID         int64
+		Name       string
+		Mountpoint string
+		Owner      string
+		Status     string
+		Listeners  int
+		CreatedAt  time.Time
+	}
+
+	var stations []stationInfo
+	maxNameLen := 4       // "Name"
+	maxMountLen := 10     // "Mountpoint"
+	maxOwnerLen := 5      // "Owner"
+
+	for rows.Next() {
+		var s stationInfo
+		if err := rows.Scan(&s.ID, &s.Name, &s.Mountpoint, &s.Owner, &s.Status, &s.Listeners, &s.CreatedAt); err != nil {
+			return fmt.Errorf("failed to scan station: %w", err)
+		}
+
+		// Truncate owner pubkey for display
+		if len(s.Owner) > 16 {
+			s.Owner = s.Owner[:8] + "..." + s.Owner[len(s.Owner)-4:]
+		}
+
+		if len(s.Name) > maxNameLen {
+			maxNameLen = len(s.Name)
+		}
+		if len(s.Mountpoint) > maxMountLen {
+			maxMountLen = len(s.Mountpoint)
+		}
+		if len(s.Owner) > maxOwnerLen {
+			maxOwnerLen = len(s.Owner)
+		}
+
+		stations = append(stations, s)
+	}
+
+	if len(stations) == 0 {
+		fmt.Println("No stations found.")
+		return nil
+	}
+
+	// Print header
+	fmt.Println()
+	fmt.Printf("  %-4s │ %-*s │ %-*s │ %-*s │ %-8s │ %-9s │ %s\n",
+		"ID", maxNameLen, "Name", maxMountLen, "Mountpoint", maxOwnerLen, "Owner", "Status", "Listeners", "Created")
+	fmt.Printf("──────┼─%s─┼─%s─┼─%s─┼──────────┼───────────┼─────────────────────\n",
+		strings.Repeat("─", maxNameLen), strings.Repeat("─", maxMountLen), strings.Repeat("─", maxOwnerLen))
+
+	// Print stations
+	for _, s := range stations {
+		statusIcon := "●"
+		if s.Status == "online" {
+			statusIcon = "\033[32m●\033[0m" // Green
+		} else {
+			statusIcon = "\033[31m●\033[0m" // Red
+		}
+
+		fmt.Printf("  %-4d │ %-*s │ %-*s │ %-*s │ %s %-6s │ %-9d │ %s\n",
+			s.ID, maxNameLen, s.Name, maxMountLen, s.Mountpoint, maxOwnerLen, s.Owner,
+			statusIcon, s.Status, s.Listeners,
+			s.CreatedAt.Format("2006-01-02 15:04:05"))
+	}
+
+	fmt.Printf("\nTotal: %d station(s)\n", len(stations))
+	return nil
+}
+
+// cliDeleteStation deletes a station by ID
+func cliDeleteStation(db *database.DB, id int64) error {
+	// First check if station exists and get its name
+	var name string
+	var mountpoint string
+	err := db.QueryRow("SELECT name, mountpoint FROM stations WHERE id = ?", id).Scan(&name, &mountpoint)
+	if err != nil {
+		return fmt.Errorf("station with ID %d not found", id)
+	}
+
+	// Delete the station
+	result, err := db.Exec("DELETE FROM stations WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete station: %w", err)
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("station with ID %d not found", id)
+	}
+
+	fmt.Printf("Station deleted successfully:\n")
+	fmt.Printf("  ID:         %d\n", id)
+	fmt.Printf("  Name:       %s\n", name)
+	fmt.Printf("  Mountpoint: %s\n", mountpoint)
+
+	return nil
 }

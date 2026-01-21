@@ -14,30 +14,28 @@ import (
 
 	"github.com/JB-SelfCompany/yggradio/internal/federation_server"
 	"github.com/JB-SelfCompany/yggradio/internal/utils"
+	"github.com/JB-SelfCompany/yggradio/internal/version"
 )
 
 var (
-	// Version is set at build time
-	Version = "1.0.0"
-
 	// Command line flags
-	configPath = flag.String("config", "~/.yggradio-federation/config.yaml", "Path to configuration file")
-	version    = flag.Bool("version", false, "Show version information")
+	configPath  = flag.String("config", "~/.yggradio-federation/config.yaml", "Path to configuration file")
+	showVersion = flag.Bool("version", false, "Show version information")
 )
 
 func main() {
 	flag.Parse()
 
 	// Show version and exit
-	if *version {
-		fmt.Printf("YggRadio Federation Server version %s\n", Version)
+	if *showVersion {
+		fmt.Printf("YggRadio Federation Server version %s\n", version.Version)
 		os.Exit(0)
 	}
 
 	// Setup logger (initially to stdout only)
 	logger := log.New(os.Stdout, "[federation-server] ", log.LstdFlags|log.Lshortfile)
 
-	logger.Printf("Starting YggRadio Federation Server v%s", Version)
+	logger.Printf("Starting YggRadio Federation Server v%s", version.Version)
 
 	// Load configuration
 	cfg, err := federation_server.Load(*configPath)
@@ -101,7 +99,7 @@ func main() {
 	}
 
 	// Create and start server
-	server := federation_server.NewServer(cfg, db, logger, Version)
+	server := federation_server.NewServer(cfg, db, logger, version.Version)
 
 	if err := server.Start(); err != nil {
 		logger.Fatalf("Failed to start server: %v", err)
